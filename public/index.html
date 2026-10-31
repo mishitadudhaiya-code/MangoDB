@@ -3,40 +3,429 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="BugBound – Change-impact analysis tool that builds a dependency graph and simulates what a proposed change would break.">
-  <title>BugBound – Change Impact Analysis</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .container { text-align: center; max-width: 600px; padding: 2rem; }
-    h1 { font-size: 2.5rem; margin-bottom: 0.5rem; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .tagline { font-size: 1.1rem; color: #94a3b8; margin-bottom: 2rem; }
-    .health-box { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 1.5rem; margin-top: 1rem; }
-    .health-box h2 { font-size: 1rem; color: #64748b; margin-bottom: 0.5rem; }
-    #health-result { font-family: monospace; color: #22c55e; }
-    .note { font-size: 0.8rem; color: #64748b; margin-top: 1.5rem; font-style: italic; }
-  </style>
+  <title>BugBound — Change-Impact Analysis for Production Systems</title>
+  <meta name="description" content="BugBound builds a dependency graph of your application and simulates what proposed changes break before you deploy.">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Cytoscape.js & Chart.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="container">
-    <h1>BugBound</h1>
-    <p class="tagline">One tiny code change. How much of your application does it break?</p>
-    <p class="note">Estimates based on a static dependency model, not guarantees.</p>
-    <div class="health-box">
-      <h2>API Health</h2>
-      <pre id="health-result">Checking...</pre>
+
+  <!-- Top Navigation Header -->
+  <header class="top-header">
+    <div class="brand-section">
+      <div class="brand-logo">
+        <div class="brand-icon">⚡</div>
+        <span class="brand-title">BugBound</span>
+      </div>
+      <div class="brand-tagline">One tiny code change. How much of your application does it break?</div>
+    </div>
+
+    <div class="header-badges">
+      <div class="honesty-pill">
+        <span>⚠️</span>
+        <span>Estimates based on a static dependency model, not guarantees.</span>
+      </div>
+      <div id="db-status-pill" class="status-indicator">
+        <span class="dot dot-yellow"></span>
+        <span id="db-status-text">Checking DB...</span>
+      </div>
+      <div id="stream-status-pill" class="status-indicator">
+        <span class="dot dot-blue"></span>
+        <span id="stream-status-text">SSE Feed</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Application Body -->
+  <div class="app-container">
+
+    <!-- ==================== LEFT SIDEBAR ==================== -->
+    <aside class="sidebar-left">
+
+      <!-- Project & Version Picker -->
+      <div class="panel-section">
+        <div class="section-header">
+          <span class="section-title">📂 Project</span>
+          <button id="btn-new-project" class="btn btn-secondary btn-sm" title="Create new project">+ New</button>
+        </div>
+        <div class="form-group">
+          <select id="project-select">
+            <option value="">Select a project...</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-top: 0.5rem;">
+          <label for="version-select">Graph Version</label>
+          <select id="version-select">
+            <option value="">Select version...</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Demo Actions (One-Click) -->
+      <div class="panel-section">
+        <div class="section-header">
+          <span class="section-title">✨ Demo Controls</span>
+        </div>
+        <div class="demo-button-group">
+          <button id="btn-seed-demo" class="btn btn-primary btn-block">
+            <span>⚡</span> Load ShopLite Demo
+          </button>
+          <button id="btn-upload-v2" class="btn btn-secondary btn-block btn-sm">
+            <span>📦</span> Upload ShopLite v2
+          </button>
+          <button id="btn-upload-invalid" class="btn btn-secondary btn-block btn-sm">
+            <span>💥</span> Try Broken Manifest (422)
+          </button>
+        </div>
+      </div>
+
+      <!-- Custom Manifest Upload -->
+      <div class="panel-section">
+        <div class="section-header">
+          <span class="section-title">📤 Upload Manifest</span>
+        </div>
+        <div class="file-upload-box" id="drop-zone">
+          <input type="file" id="manifest-file-input" accept=".json">
+          <div style="font-size: 1.25rem; margin-bottom: 0.25rem;">📄</div>
+          <div style="font-size: 0.8rem; font-weight: 500;">Click or Drop Manifest JSON</div>
+          <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.2rem;">Validated & Idempotent</div>
+        </div>
+      </div>
+
+      <!-- Live Events Stream (SSE) -->
+      <div class="panel-section" style="flex: 1; display: flex; flex-direction: column;">
+        <div class="section-header">
+          <span class="section-title">📡 Live Feed</span>
+          <span style="font-size: 0.7rem; color: var(--text-muted);">SSE Stream</span>
+        </div>
+        <div class="events-stream-list" id="events-stream-list">
+          <!-- Filled dynamically via SSE -->
+          <div style="color: var(--text-muted); font-size: 0.75rem; text-align: center; padding: 1rem;">
+            Connecting to live event stream...
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- ==================== CENTER GRAPH ==================== -->
+    <main class="main-center">
+
+      <!-- Graph Toolbar -->
+      <div class="graph-toolbar">
+        <div class="toolbar-group">
+          <button id="btn-fit-graph" class="btn btn-secondary btn-sm" title="Fit to Screen">Fit</button>
+          <select id="layout-select" style="width: auto; padding: 0.3rem 0.5rem; font-size: 0.75rem;">
+            <option value="cose">Layout: CoSE (Physics)</option>
+            <option value="breadthfirst">Layout: Breadthfirst</option>
+            <option value="circle">Layout: Circle</option>
+            <option value="concentric">Layout: Concentric</option>
+          </select>
+          <button id="btn-replay-anim" class="btn btn-secondary btn-sm" style="display: none;">▶ Replay Animation</button>
+        </div>
+
+        <!-- Legend -->
+        <div class="legend-bar">
+          <div class="legend-item"><span class="dot dot-blue"></span> Target</div>
+          <div class="legend-item"><span class="dot dot-red"></span> BROKEN</div>
+          <div class="legend-item"><span class="dot" style="background: #f97316;"></span> AT_RISK</div>
+          <div class="legend-item"><span class="dot dot-yellow"></span> UNCERTAIN</div>
+          <div class="legend-item"><span class="dot dot-green"></span> SAFE</div>
+        </div>
+      </div>
+
+      <!-- Cytoscape Graph Canvas -->
+      <div id="cy"></div>
+
+      <!-- Animation Level Banner -->
+      <div id="animation-banner" class="animation-banner" style="display: none;">
+        <span>🔥 Chain Reaction:</span>
+        <span id="anim-stage-text">Propagating impact...</span>
+      </div>
+
+      <!-- Floating Node Detail Flyout -->
+      <div id="node-flyout" class="node-flyout">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+          <h4 id="flyout-title" style="font-size: 0.9rem; font-weight: 700;">Component</h4>
+          <button id="btn-close-flyout" class="close-btn" style="font-size: 1rem;">×</button>
+        </div>
+        <div id="flyout-type" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem;"></div>
+        <div id="flyout-criticality" style="font-size: 0.75rem; color: var(--accent-cyan); margin-bottom: 0.5rem;"></div>
+        <div id="flyout-status-block" style="display: none; border-top: 1px solid var(--border-color); padding-top: 0.5rem; margin-top: 0.5rem;">
+          <div id="flyout-status" style="font-weight: 700; font-size: 0.85rem; margin-bottom: 0.3rem;"></div>
+          <div id="flyout-reason" style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.3rem;"></div>
+          <div id="flyout-recommendation" style="font-size: 0.75rem; color: #38bdf8;"></div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- ==================== RIGHT SIDEBAR (TABS) ==================== -->
+    <aside class="sidebar-right">
+
+      <!-- Tab Navigation -->
+      <div class="tabs-nav">
+        <button class="tab-btn active" data-tab="tab-whatif">What-If</button>
+        <button class="tab-btn" data-tab="tab-report">Report</button>
+        <button class="tab-btn" data-tab="tab-history">History</button>
+        <button class="tab-btn" data-tab="tab-analytics">Analytics</button>
+      </div>
+
+      <!-- TAB 1: WHAT-IF SIMULATOR -->
+      <div id="tab-whatif" class="tab-content active">
+
+        <div class="panel-section">
+          <div class="section-header">
+            <span class="section-title">🎯 Propose a Change</span>
+          </div>
+
+          <!-- Quick Presets for Demo -->
+          <label>Quick Demo Scenarios</label>
+          <div class="preset-chips">
+            <button class="preset-chip" data-preset="rename-username">Rename user_name</button>
+            <button class="preset-chip" data-preset="delete-email">Delete email field</button>
+            <button class="preset-chip" data-preset="change-timeout">Change PAYMENT_TIMEOUT</button>
+            <button class="preset-chip" data-preset="upgrade-payments">Upgrade payments-sdk</button>
+          </div>
+
+          <!-- Change Type -->
+          <div class="form-group" style="margin-top: 0.8rem;">
+            <label for="change-type-select">Change Type</label>
+            <select id="change-type-select">
+              <option value="RENAME_FIELD">RENAME_FIELD (field / api)</option>
+              <option value="DELETE_FIELD">DELETE_FIELD (field)</option>
+              <option value="CHANGE_FIELD_TYPE">CHANGE_FIELD_TYPE (field)</option>
+              <option value="DELETE_ENDPOINT">DELETE_ENDPOINT (api)</option>
+              <option value="CHANGE_FUNCTION_SIGNATURE">CHANGE_FUNCTION_SIGNATURE (function)</option>
+              <option value="CHANGE_CONFIG">CHANGE_CONFIG (config)</option>
+              <option value="UPGRADE_DEPENDENCY_MAJOR">UPGRADE_DEPENDENCY_MAJOR (package)</option>
+            </select>
+          </div>
+
+          <!-- Target Component -->
+          <div class="form-group">
+            <label for="target-component-select">Target Component</label>
+            <select id="target-component-select">
+              <option value="">Load a graph version first...</option>
+            </select>
+          </div>
+
+          <!-- Dynamic Params Container -->
+          <div id="params-container">
+            <!-- Rendered dynamically depending on change type -->
+          </div>
+
+          <!-- Simulate Button -->
+          <div style="margin-top: 1rem;">
+            <button id="btn-simulate" class="btn btn-primary btn-block">
+              <span>🚀</span> Run Impact Simulation
+            </button>
+          </div>
+
+        </div>
+
+        <div class="panel-section">
+          <div class="section-header">
+            <span class="section-title">💡 How it Works</span>
+          </div>
+          <p style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+            BugBound uses a reverse Breadth-First Search (BFS) starting from your changed component.
+            Static edges cascade as <strong>BROKEN</strong> or <strong>AT_RISK</strong>.
+            Any dependency passing through a dynamic access edge (e.g. <code>data[key]</code>) is honestly labeled <strong>UNCERTAIN</strong>.
+          </p>
+        </div>
+
+      </div>
+
+      <!-- TAB 2: IMPACT REPORT -->
+      <div id="tab-report" class="tab-content">
+
+        <!-- Blast Radius Gauge -->
+        <div class="gauge-card">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="section-title">Blast Radius</span>
+            <span id="cached-badge" class="badge-low" style="display: none; font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 4px;">⚡ Cached (Idempotent)</span>
+          </div>
+          <div id="gauge-score" class="gauge-score-display score-low">0</div>
+          <div id="gauge-label" class="gauge-label badge-low">LOW IMPACT</div>
+
+          <!-- Counts Grid -->
+          <div class="counts-grid">
+            <div class="count-card">
+              <div id="count-broken" class="count-val" style="color: var(--status-broken);">0</div>
+              <div class="count-lbl">Broken</div>
+            </div>
+            <div class="count-card">
+              <div id="count-at-risk" class="count-val" style="color: var(--status-at-risk);">0</div>
+              <div class="count-lbl">At Risk</div>
+            </div>
+            <div class="count-card">
+              <div id="count-uncertain" class="count-val" style="color: var(--status-uncertain);">0</div>
+              <div class="count-lbl">Uncertain</div>
+            </div>
+            <div class="count-card">
+              <div id="count-safe" class="count-val" style="color: var(--status-safe);">0</div>
+              <div class="count-lbl">Safe</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Download report -->
+        <div>
+          <button id="btn-download-report" class="btn btn-secondary btn-block btn-sm">
+            <span>📥</span> Download Full Report (JSON)
+          </button>
+        </div>
+
+        <!-- Needs Manual Review Alert (Uncertain) -->
+        <div id="uncertain-section" class="panel-section" style="display: none; border-left: 3px solid var(--status-uncertain);">
+          <div class="section-header">
+            <span class="section-title" style="color: #fde047;">⚠️ Needs Manual Review (Dynamic Edges)</span>
+          </div>
+          <div id="uncertain-list" class="affected-list"></div>
+        </div>
+
+        <!-- All Affected Components -->
+        <div class="panel-section">
+          <div class="section-header">
+            <span class="section-title">💥 Affected Components</span>
+            <span id="affected-count-badge" style="font-size: 0.75rem; color: var(--text-muted);">0 found</span>
+          </div>
+          <div id="affected-list" class="affected-list">
+            <div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 1rem;">
+              Run a simulation to view impact details.
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- TAB 3: SIMULATION HISTORY & COMPARE -->
+      <div id="tab-history" class="tab-content">
+        <div class="panel-section">
+          <div class="section-header">
+            <span class="section-title">📜 Past Simulations</span>
+            <button id="btn-compare" class="btn btn-secondary btn-sm" disabled>Compare (2 Selected)</button>
+          </div>
+          <p style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            Select two simulations to compare impacts side-by-side using MongoDB set aggregations.
+          </p>
+          <div id="history-list" class="affected-list">
+            <div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 1rem;">
+              No simulations yet for this project.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 4: MONGODB ANALYTICS -->
+      <div id="tab-analytics" class="tab-content">
+
+        <!-- Blast radius chart -->
+        <div class="panel-section">
+          <div class="section-header">
+            <span class="section-title">📊 Blast Radius Trends</span>
+          </div>
+          <div style="height: 180px;">
+            <canvas id="blast-chart"></canvas>
+          </div>
+        </div>
+
+        <!-- Fragile components table -->
+        <div class="panel-section">
+          <div class="section-header">
+            <span class="section-title">🛡️ Top Fragile Components</span>
+          </div>
+          <div class="table-container">
+            <table id="fragile-table">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Impacts</th>
+                  <th>Worst Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="3" style="text-align:center; color: var(--text-muted);">No data yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Hotspots table -->
+        <div class="panel-section">
+          <div class="section-header">
+            <span class="section-title">🔥 Dependency Hotspots</span>
+          </div>
+          <div class="table-container">
+            <table id="hotspots-table">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Dependents</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="2" style="text-align:center; color: var(--text-muted);">No data yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+    </aside>
+
+  </div>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- New Project Modal -->
+  <div id="modal-new-project" class="modal-overlay">
+    <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3 style="font-size: 1rem; font-weight: 700;">Create New Project</h3>
+        <button id="btn-close-project-modal" class="close-btn">×</button>
+      </div>
+      <div class="form-group">
+        <label for="new-project-name">Project Name</label>
+        <input type="text" id="new-project-name" placeholder="e.g. MyMicroservice">
+      </div>
+      <div style="margin-top: 1rem; display: flex; justify-content: flex-end; gap: 0.5rem;">
+        <button id="btn-cancel-project" class="btn btn-secondary btn-sm">Cancel</button>
+        <button id="btn-create-project-submit" class="btn btn-primary btn-sm">Create</button>
+      </div>
     </div>
   </div>
-  <script>
-    fetch('/api/health')
-      .then(r => r.json())
-      .then(data => {
-        document.getElementById('health-result').textContent = JSON.stringify(data, null, 2);
-      })
-      .catch(err => {
-        document.getElementById('health-result').textContent = 'Error: ' + err.message;
-        document.getElementById('health-result').style.color = '#ef4444';
-      });
-  </script>
+
+  <!-- Compare Modal -->
+  <div id="modal-compare" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-size: 1.1rem; font-weight: 700;">Simulation Comparison (MongoDB Aggregation)</h3>
+        <button id="btn-close-compare-modal" class="close-btn">×</button>
+      </div>
+      <div id="compare-modal-body">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container"></div>
+
+  <!-- Application Logic -->
+  <script src="app.js"></script>
 </body>
 </html>
