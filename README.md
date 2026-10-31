@@ -239,8 +239,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 - **Hackathon:** UNCHARTED 2026 (NEXUS × SVNIT Surat)
 - **Track 3:** Developer Tools for Production Use Cases
-- **Team Name:** [TODO: Insert Team Name]
+- **Team Name:** MangoDB
 - **Members:**
-  - [TODO: Member 1 - Name & Role]
-  - [TODO: Member 2 - Name & Role]
-  - [TODO: Member 3 - Name & Role]
+  - Margi Chaudhary
+  - Mishita Dudhaiya
+  - Heshika Pareek
