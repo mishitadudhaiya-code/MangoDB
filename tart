@@ -1,0 +1,14 @@
+[33mcba6c05[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Configure Google and Cloudflare DNS in shared DB module and update live deployment URL in README
+[33m837b770[m[33m ([m[1;31morigin/main[m[33m)[m Initial commit: BugBound skeleton
+[33mf48f4cf[m Step 9 (Optional WOW): Source scanner — regex extractor for API calls, property reads, dynamic access, and function calls with UI code scanner modal and 4 tests (61 passing tests total)
+[33mc3213d1[m Step 5: Engine hardening — missing edges, leaf target, missing params, 2-node graph, cyclic dynamic edges tested and defended (57 passing tests)
+[33mfb9fdad[m Step 11: Comprehensive README for judges — problem, features, ASCII architecture, propagation rules, blast radius formula, MongoDB feature map, demo walkthrough, API table, limitations, tech stack
+[33m3765a28[m Step 10: Deployment hardening — in-memory rate limiting, 413 payload limit handling, environment verification, zero runtime devDependencies, and DEPLOYMENT.md checklist
+[33m0a34ab0[m Step 7: Frontend: graph + what-if + report — Cytoscape graph, animated chain reaction, what-if simulator, report gauge, compare modal, Chart.js analytics, live SSE feed
+[33md115871[m Step 8: Demo seed and one-click samples — POST /api/demo/seed, GET /api/demo/samples/:name (shoplite, shoplite-v2, invalid), 52 passing tests
+[33m500cbfd[m Step 6: Analytics and change stream live feed — blastRankings, fragileComponents, hotspots aggregations, GET analytics, GET events, GET stream (SSE with change streams and fallback polling)
+[33m7e38e63[m Step 4: Simulate, history, compare — POST simulate (with caching), GET simulations, GET simulation by ID, GET compare with MongoDB aggregation
+[33m6d9d867[m Step 3: Projects, manifest upload routes (idempotent, validated, hashed)
+[33m7c3d5b5[m Step 2: Graph and impact engine — validateManifest, buildGraph, propagate (BFS), score, simulate, hash, templates, ShopLite samples, 26 passing tests
+[33m6f8a787[m Step 1: MongoDB connection, validators, indexes, events logging, db:check script
+[33m4ab7678[m Step 0: Project skeleton with Express server, health check, static file serving, and placeholder structure

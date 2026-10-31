@@ -1,7 +1,8 @@
 /**
- * public/app.js — BugBound Frontend Application Controller
- * Handles graph rendering (Cytoscape.js), what-if simulation animations,
- * history comparison, MongoDB analytics (Chart.js), and live SSE stream.
+ * public/app.js — BugBound Frontend Controller
+ * Implements: Cytoscape visualizer, animated chain reaction with ripple pulse,
+ * component explorer, "color by" switching, what-if simulations, history comparison,
+ * Chart.js analytics, live SSE feed, and code scanner.
  */
 
 // Application State
@@ -11,24 +12,36 @@ const state = {
   graphData: null,
   lastSimulation: null,
   selectedHistory: new Set(),
+  selectedNodeId: null,
+  colorBy: 'type',
+  activeLayout: 'cose',
   cy: null,
   chart: null,
   eventSource: null
 };
 
-// Component Type to Cytoscape Shape Mapping
-const TYPE_SHAPES = {
-  field: 'round-rectangle',
-  table: 'rectangle',
-  api: 'diamond',
-  function: 'ellipse',
-  page: 'hexagon',
-  service: 'barrel',
-  config: 'rectangle',
-  package: 'octagon'
+// Node Type Palettes (Warm / Tech Hues)
+const TYPE_COLORS = {
+  field: { bg: '#b45309', border: '#f59e0b' },      // Amber
+  table: { bg: '#78350f', border: '#d97706' },      // Warm brown/orange
+  api: { bg: '#6b21a8', border: '#a855f7' },        // Purple
+  function: { bg: '#0e7490', border: '#06b6d4' },   // Cyan
+  page: { bg: '#0369a1', border: '#38bdf8' },       // Sky blue
+  service: { bg: '#be185d', border: '#ec4899' },    // Pink
+  config: { bg: '#334155', border: '#94a3b8' },     // Slate
+  package: { bg: '#9f1239', border: '#f43f5e' }     // Rose
 };
 
-// Target Type compatibility for Change Types
+// Criticality 1-5 Heatmap Colors
+const CRITICALITY_COLORS = {
+  1: { bg: '#064e3b', border: '#10b981' }, // Low (Green)
+  2: { bg: '#155e75', border: '#06b6d4' }, // Low-Mid (Cyan)
+  3: { bg: '#854d0e', border: '#eab308' }, // Mid (Yellow)
+  4: { bg: '#9a3412', border: '#f97316' }, // High (Orange)
+  5: { bg: '#991b1b', border: '#ef4444' }  // Critical (Red)
+};
+
+// Compatible component types per change type
 const COMPATIBLE_TYPES = {
   RENAME_FIELD: ['field', 'api'],
   DELETE_FIELD: ['field'],
@@ -39,12 +52,13 @@ const COMPATIBLE_TYPES = {
   UPGRADE_DEPENDENCY_MAJOR: ['package']
 };
 
-// ==================== Initialization ====================
+// ==================== 1. Initialization ====================
 
 document.addEventListener('DOMContentLoaded', async () => {
   initCytoscape();
   setupEventListeners();
   setupDynamicParams();
+  setupAccordions();
   initSSE();
   await checkHealth();
   await loadProjects();
@@ -55,17 +69,18 @@ document.addEventListener('DOMContentLoaded', async () => {
  */
 async function checkHealth() {
   const pill = document.getElementById('db-status-pill');
-  const text = document.getElementById('db-status-text');
   try {
     const res = await fetch('/api/health');
     const data = await res.json();
     if (data.db === 'up') {
-      pill.innerHTML = '<span class="dot dot-green"></span><span>Atlas Connected</span>';
+      pill.innerHTML = '<span class="indicator-dot green"></span><span>Atlas</span>';
+      pill.title = 'MongoDB Atlas Connected';
     } else {
-      pill.innerHTML = '<span class="dot dot-yellow"></span><span>DB Offline</span>';
+      pill.innerHTML = '<span class="indicator-dot yellow"></span><span>Offline</span>';
+      pill.title = 'Database Not Connected';
     }
   } catch (err) {
-    pill.innerHTML = '<span class="dot dot-red"></span><span>Server Down</span>';
+    pill.innerHTML = '<span class="indicator-dot red"></span><span>Error</span>';
   }
 }
 
@@ -73,70 +88,61 @@ async function checkHealth() {
  * Initialize Server-Sent Events (SSE) live feed
  */
 function initSSE() {
-  const list = document.getElementById('events-stream-list');
-  const streamText = document.getElementById('stream-status-text');
+  const streamPill = document.getElementById('stream-status-pill');
 
   try {
     state.eventSource = new EventSource('/api/stream');
 
     state.eventSource.onopen = () => {
-      streamText.textContent = 'Live SSE Connected';
-      const indicator = document.querySelector('#stream-status-pill .dot');
-      if (indicator) indicator.className = 'dot dot-green';
+      streamPill.innerHTML = '<span class="indicator-dot green"></span><span>Live</span>';
     };
 
     state.eventSource.onmessage = (e) => {
       try {
-        const event = JSON.parse(e.data);
-        addEventToFeed(event, true);
-      } catch (_err) {
-        // SSE comments / heartbeats
-      }
+        const ev = JSON.parse(e.data);
+        addEventToFeed(ev, true);
+        showToast(`Event: ${ev.type} (${ev.status || 'ok'})`, ev.status === 'rejected' ? 'error' : 'info');
+      } catch (_err) {}
     };
 
     state.eventSource.onerror = () => {
-      streamText.textContent = 'Reconnecting...';
-      const indicator = document.querySelector('#stream-status-pill .dot');
-      if (indicator) indicator.className = 'dot dot-yellow';
+      streamPill.innerHTML = '<span class="indicator-dot yellow"></span><span>Feed</span>';
     };
   } catch (err) {
-    console.warn('SSE not supported or connection error:', err);
+    console.warn('SSE not initialized:', err);
   }
 }
 
 /**
- * Prepend an event item to the Live Feed
+ * Add item to live feed list
  */
 function addEventToFeed(ev, isLive = false) {
-  const list = document.getElementById('events-stream-list');
-  if (list.children.length === 1 && list.children[0].textContent.includes('Connecting')) {
-    list.innerHTML = '';
+  const feedEl = document.getElementById('compact-event-feed');
+  if (feedEl.children.length === 1 && feedEl.children[0].textContent.includes('Awaiting')) {
+    feedEl.innerHTML = '';
   }
 
-  const item = document.createElement('div');
-  item.className = `event-item status-${ev.status || 'ok'}`;
+  const row = document.createElement('div');
+  row.className = `feed-row ${ev.status || 'ok'}`;
+  const time = new Date(ev.at || Date.now()).toLocaleTimeString();
+  const det = ev.details ? JSON.stringify(ev.details) : '';
 
-  const timeStr = new Date(ev.at || Date.now()).toLocaleTimeString();
-  const detailsStr = ev.details ? JSON.stringify(ev.details) : '';
-
-  item.innerHTML = `
-    <div class="event-header">
+  row.innerHTML = `
+    <div style="display:flex;justify-content:space-between;color:var(--text-muted);">
       <span>${ev.projectId || 'system'}</span>
-      <span>${timeStr} ${isLive ? '• live' : ''}</span>
+      <span>${time} ${isLive ? '• live' : ''}</span>
     </div>
-    <div class="event-type">${ev.type}</div>
-    ${detailsStr ? `<div style="color:var(--text-secondary);font-size:0.68rem;word-break:break-all;">${detailsStr.substring(0, 100)}</div>` : ''}
+    <div style="font-weight:600;color:var(--text-primary);">${ev.type}</div>
+    ${det ? `<div style="color:var(--text-secondary);font-size:0.62rem;word-break:break-all;">${det.substring(0, 80)}</div>` : ''}
   `;
 
-  list.insertBefore(item, list.firstChild);
-
-  // Keep max 30 items in the DOM
-  while (list.children.length > 30) {
-    list.removeChild(list.lastChild);
+  feedEl.insertBefore(row, feedEl.firstChild);
+  while (feedEl.children.length > 25) {
+    feedEl.removeChild(feedEl.lastChild);
   }
 }
 
-// ==================== Cytoscape Graph Setup ====================
+// ==================== 2. Cytoscape Graph Engine ====================
 
 function initCytoscape() {
   state.cy = cytoscape({
@@ -144,149 +150,179 @@ function initCytoscape() {
     boxSelectionEnabled: false,
     autounselectify: false,
     style: [
-      // Core node styles
+      // Base Node Style: Modern Circles with soft glow
       {
         selector: 'node',
         style: {
+          'shape': 'ellipse',
+          'width': 38,
+          'height': 38,
           'label': 'data(name)',
-          'shape': 'data(shape)',
-          'background-color': '#1e293b',
-          'border-width': 2,
-          'border-color': '#475569',
-          'color': '#f8fafc',
           'font-family': 'Inter, sans-serif',
-          'font-size': '11px',
-          'text-valign': 'center',
-          'text-halign': 'center',
-          'width': 'label',
-          'height': '36px',
-          'padding': '12px',
-          'text-wrap': 'wrap',
-          'text-max-width': '120px',
-          'transition-property': 'background-color, border-color, opacity, border-width',
-          'transition-duration': '0.3s'
+          'font-size': '10px',
+          'font-weight': 500,
+          'text-valign': 'bottom',
+          'text-margin-y': 5,
+          'color': '#cbd5e1',
+          'background-color': '#111827',
+          'border-width': 2.5,
+          'border-color': '#f59e0b',
+          'text-max-width': '110px',
+          'text-wrap': 'ellipsis',
+          'transition-property': 'background-color, border-color, width, height, opacity, border-width',
+          'transition-duration': '0.2s'
         }
       },
-      // Edge styles (from depends on to: consumer -> provider)
+      // Selected Node
       {
-        selector: 'edge',
+        selector: 'node:selected',
         style: {
-          'width': 2,
-          'line-color': '#475569',
-          'target-arrow-color': '#475569',
-          'target-arrow-shape': 'triangle',
-          'curve-style': 'bezier',
-          'arrow-scale': 1.1,
-          'transition-property': 'line-color, target-arrow-color, width',
-          'transition-duration': '0.3s'
+          'border-width': 4,
+          'border-color': '#19e6a1',
+          'color': '#ffffff'
         }
       },
-      // Dynamic edges (dashed)
-      {
-        selector: 'edge[?dynamic]',
-        style: {
-          'line-style': 'dashed',
-          'line-dash-pattern': [6, 3],
-          'line-color': '#eab308',
-          'target-arrow-color': '#eab308'
-        }
-      },
-      // Target changed node (Blue glow)
+      // Target Node in Simulation (Electric Blue Glow)
       {
         selector: 'node.status-target',
         style: {
           'background-color': '#1d4ed8',
-          'border-color': '#38bdf8',
-          'border-width': 4,
+          'border-color': '#3b82f6',
+          'border-width': 4.5,
+          'width': 46,
+          'height': 46,
           'color': '#ffffff'
         }
       },
-      // BROKEN status (Red)
+      // BROKEN Status (Coral Red)
       {
         selector: 'node.status-BROKEN',
         style: {
-          'background-color': '#991b1b',
+          'background-color': '#7f1d1d',
           'border-color': '#ef4444',
-          'border-width': 3,
+          'border-width': 3.5,
           'color': '#ffffff'
         }
       },
-      // AT_RISK status (Orange)
+      // AT_RISK Status (Orange)
       {
         selector: 'node.status-AT_RISK',
         style: {
-          'background-color': '#9a3412',
+          'background-color': '#7c2d12',
           'border-color': '#f97316',
           'border-width': 3,
           'color': '#ffffff'
         }
       },
-      // UNCERTAIN status (Yellow dashed border)
+      // UNCERTAIN Status (Yellow Dashed Border)
       {
         selector: 'node.status-UNCERTAIN',
         style: {
-          'background-color': '#854d0e',
-          'border-color': '#facc15',
+          'background-color': '#713f12',
+          'border-color': '#eab308',
           'border-width': 3,
           'border-style': 'dashed',
           'color': '#ffffff'
         }
       },
-      // SAFE status (Dimmed Green)
+      // SAFE Status (Dimmed Gray-Green)
       {
         selector: 'node.status-SAFE',
         style: {
           'background-color': '#064e3b',
           'border-color': '#10b981',
-          'opacity': 0.45
+          'opacity': 0.35
         }
       },
-      // Highlighted path edges
+      // Edges: Thin, semi-transparent with arrows
+      {
+        selector: 'edge',
+        style: {
+          'width': 1.5,
+          'line-color': 'rgba(148, 163, 184, 0.28)',
+          'target-arrow-color': 'rgba(148, 163, 184, 0.4)',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          'arrow-scale': 0.9,
+          'transition-property': 'line-color, target-arrow-color, width',
+          'transition-duration': '0.2s'
+        }
+      },
+      // Dynamic Edges (Dashed)
+      {
+        selector: 'edge[?dynamic]',
+        style: {
+          'line-style': 'dashed',
+          'line-dash-pattern': [5, 3],
+          'line-color': '#eab308',
+          'target-arrow-color': '#eab308',
+          'width': 2
+        }
+      },
+      // Highlighted Propagation Path
       {
         selector: 'edge.highlighted-path',
         style: {
           'line-color': '#ef4444',
           'target-arrow-color': '#ef4444',
-          'width': 4
+          'width': 3.5
         }
       }
     ]
   });
 
-  // Node Click: Open details flyout
+  // Tap on node: select & show details
   state.cy.on('tap', 'node', (evt) => {
     const node = evt.target;
-    showNodeFlyout(node.data());
+    selectNode(node);
   });
 
-  // Background Click: Close flyout
+  // Tap on canvas background: deselect
   state.cy.on('tap', (evt) => {
     if (evt.target === state.cy) {
       document.getElementById('node-flyout').style.display = 'none';
+      state.selectedNodeId = null;
     }
   });
 }
 
 /**
- * Show node details in the floating flyout card
+ * Handle selecting a node (focus, flyout, connections)
+ */
+function selectNode(node) {
+  const d = node.data();
+  state.selectedNodeId = d.id;
+
+  // Center node smoothly
+  state.cy.animate({
+    center: { eles: node },
+    zoom: Math.max(state.cy.zoom(), 1.4)
+  }, { duration: 250 });
+
+  showNodeFlyout(d);
+  populateAccordionDetails(d);
+}
+
+/**
+ * Show node details in floating HUD flyout
  */
 function showNodeFlyout(nodeData) {
   const flyout = document.getElementById('node-flyout');
   document.getElementById('flyout-title').textContent = nodeData.name || nodeData.id;
-  document.getElementById('flyout-type').textContent = `Type: ${nodeData.type || 'unknown'} • ID: ${nodeData.id}`;
+  document.getElementById('flyout-type').textContent = `[${nodeData.type || 'component'}] ${nodeData.id}`;
   document.getElementById('flyout-criticality').textContent = `Criticality: ${'★'.repeat(nodeData.criticality || 3)}${'☆'.repeat(5 - (nodeData.criticality || 3))}`;
 
   const statusBlock = document.getElementById('flyout-status-block');
   if (nodeData.simulationStatus) {
     statusBlock.style.display = 'block';
     const stEl = document.getElementById('flyout-status');
-    stEl.textContent = `Status: ${nodeData.simulationStatus} (Depth ${nodeData.simulationDepth || 1})`;
+    stEl.textContent = `STATUS: ${nodeData.simulationStatus} (Depth ${nodeData.simulationDepth || 1})`;
     stEl.style.color = nodeData.simulationStatus === 'BROKEN' ? '#ef4444' :
                        nodeData.simulationStatus === 'AT_RISK' ? '#f97316' :
                        nodeData.simulationStatus === 'UNCERTAIN' ? '#eab308' : '#10b981';
 
-    document.getElementById('flyout-reason').textContent = nodeData.simulationReason || 'Affected by dependency chain';
-    document.getElementById('flyout-recommendation').textContent = `Action: ${nodeData.simulationRecommendation || 'Review component'}`;
+    document.getElementById('flyout-reason').textContent = nodeData.simulationReason || 'Affected downstream.';
+    document.getElementById('flyout-recommendation').textContent = `Action: ${nodeData.simulationRecommendation || 'Review component contract.'}`;
   } else {
     statusBlock.style.display = 'none';
   }
@@ -294,10 +330,42 @@ function showNodeFlyout(nodeData) {
   flyout.style.display = 'block';
 }
 
-// ==================== Data Loading ====================
+/**
+ * Populate accordion details (Reason, Chains, Connections)
+ */
+function populateAccordionDetails(nodeData) {
+  // 1. Reason & Recommendation
+  document.getElementById('reasons-node-name').textContent = nodeData.name || nodeData.id;
+  if (nodeData.simulationStatus) {
+    document.getElementById('reasons-node-text').textContent = `${nodeData.simulationStatus}: ${nodeData.simulationReason || ''}`;
+    document.getElementById('reasons-node-rec').textContent = `💡 Recommendation: ${nodeData.simulationRecommendation || 'Verify usage.'}`;
+  } else {
+    document.getElementById('reasons-node-text').textContent = 'This component is safe or not currently affected by the simulation.';
+    document.getElementById('reasons-node-rec').textContent = '';
+  }
+
+  // 2. Connections
+  const node = state.cy.getElementById(nodeData.id);
+  if (node && node.length > 0) {
+    const inEdges = node.incomers('edge');
+    const outEdges = node.outgoers('edge');
+
+    const inList = inEdges.map(e => `• Consumer: ${e.source().data('name') || e.source().id()} (${e.data('kind')}${e.data('dynamic') ? ' [dynamic]' : ''})`).join('<br>');
+    const outList = outEdges.map(e => `• Depends on: ${e.target().data('name') || e.target().id()} (${e.data('kind')})`).join('<br>');
+
+    document.getElementById('connections-list-box').innerHTML = `
+      <div style="font-weight:600;margin-bottom:0.2rem;color:var(--text-primary);">Consumers (${inEdges.length}):</div>
+      ${inList || '<div style="color:var(--text-muted);">None</div>'}
+      <div style="font-weight:600;margin:0.4rem 0 0.2rem 0;color:var(--text-primary);">Providers (${outEdges.length}):</div>
+      ${outList || '<div style="color:var(--text-muted);">None</div>'}
+    `;
+  }
+}
+
+// ==================== 3. Data Loading & Graph Rendering ====================
 
 /**
- * Load project list from /api/projects
+ * Load project list
  */
 async function loadProjects(selectId = null) {
   try {
@@ -305,7 +373,7 @@ async function loadProjects(selectId = null) {
     const projects = await res.json();
     const sel = document.getElementById('project-select');
 
-    sel.innerHTML = '<option value="">Select a project...</option>';
+    sel.innerHTML = '<option value="">Select project...</option>';
     for (const p of projects) {
       const opt = document.createElement('option');
       opt.value = p._id;
@@ -334,12 +402,12 @@ async function onProjectChange(projectId) {
 
   await loadVersions(projectId);
   await loadHistory(projectId);
-  await loadEvents(projectId);
   await loadAnalytics(projectId);
+  await loadEvents(projectId);
 }
 
 /**
- * Load versions for the current project
+ * Load graph versions for current project
  */
 async function loadVersions(projectId, selectVid = null) {
   try {
@@ -349,16 +417,16 @@ async function loadVersions(projectId, selectVid = null) {
 
     sel.innerHTML = '';
     if (versions.length === 0) {
-      sel.innerHTML = '<option value="">No versions uploaded yet</option>';
+      sel.innerHTML = '<option value="">No versions</option>';
       state.cy.elements().remove();
+      updateStatCards(0, 0, 0, 0);
       return;
     }
 
     for (const v of versions) {
       const opt = document.createElement('option');
       opt.value = v._id;
-      const dateStr = new Date(v.createdAt).toLocaleDateString();
-      opt.textContent = `v${v.version} (${v.componentCount} components, ${v.edgeCount} edges) — ${dateStr}`;
+      opt.textContent = `v${v.version} (${v.componentCount}c / ${v.edgeCount}e)`;
       sel.appendChild(opt);
     }
 
@@ -371,7 +439,7 @@ async function loadVersions(projectId, selectVid = null) {
 }
 
 /**
- * On Version Selected: Fetch Graph and Render
+ * On Version Selected: Fetch components and edges
  */
 async function onVersionChange(versionId) {
   state.currentVersion = versionId;
@@ -379,19 +447,21 @@ async function onVersionChange(versionId) {
 
   try {
     const res = await fetch(`/api/versions/${encodeURIComponent(versionId)}/graph`);
-    if (!res.ok) throw new Error('Failed to fetch graph data');
+    if (!res.ok) throw new Error('Failed to fetch graph');
     const data = await res.json();
 
     state.graphData = data;
     renderGraph(data);
     updateTargetOptions(data.components);
+    populateExplorerTree(data.components);
+    updateStatCards(data.components.length, data.edges.length, state.lastSimulation ? 1 : 0, 0);
   } catch (err) {
     showToast('Graph loading error: ' + err.message, 'error');
   }
 }
 
 /**
- * Render Cytoscape Graph with elements and layout
+ * Render Cytoscape elements
  */
 function renderGraph(data) {
   if (!state.cy) return;
@@ -401,6 +471,8 @@ function renderGraph(data) {
   // Add Nodes
   for (const c of data.components) {
     const compId = c.componentId || c.id;
+    const typeInfo = TYPE_COLORS[c.type] || { bg: '#1e293b', border: '#f59e0b' };
+
     elements.push({
       group: 'nodes',
       data: {
@@ -408,12 +480,13 @@ function renderGraph(data) {
         name: c.name || compId,
         type: c.type || 'service',
         criticality: c.criticality || 3,
-        shape: TYPE_SHAPES[c.type] || 'round-rectangle'
+        baseColor: typeInfo.border,
+        baseBg: typeInfo.bg
       }
     });
   }
 
-  // Add Edges (from consumer to provider)
+  // Add Edges
   for (const e of data.edges) {
     elements.push({
       group: 'edges',
@@ -430,25 +503,158 @@ function renderGraph(data) {
   state.cy.elements().remove();
   state.cy.add(elements);
 
-  applyLayout();
+  applyColorBy(state.colorBy);
+  applyLayout(state.activeLayout);
+
+  // Update bottom chips
+  document.getElementById('chip-components-count').textContent = `${data.components.length} components`;
+  document.getElementById('chip-edges-count').textContent = `${data.edges.length} edges`;
+  document.getElementById('chip-affected-count').textContent = '0 affected';
 }
 
 /**
- * Apply layout (CoSE or Breadthfirst)
+ * Apply layout (cose, breadthfirst, or concentric)
  */
-function applyLayout() {
-  const layoutName = document.getElementById('layout-select').value || 'cose';
+function applyLayout(layoutName = 'cose') {
+  if (!state.cy) return;
+  state.activeLayout = layoutName;
 
-  const layout = state.cy.layout({
+  let options = {
     name: layoutName,
     animate: true,
-    animationDuration: 600,
+    animationDuration: 500,
     fit: true,
-    padding: 40,
-    nodeDimensionsIncludeLabels: true
-  });
+    padding: 40
+  };
 
+  if (layoutName === 'breadthfirst') {
+    options.directed = true;
+    options.spacingFactor = 1.3;
+  } else if (layoutName === 'cose') {
+    options.nodeRepulsion = 450000;
+    options.idealEdgeLength = 90;
+  }
+
+  const layout = state.cy.layout(options);
   layout.run();
+}
+
+/**
+ * Apply "Color by" selector: Type / Status / Criticality
+ */
+function applyColorBy(mode) {
+  state.colorBy = mode;
+  if (!state.cy) return;
+
+  state.cy.batch(() => {
+    state.cy.nodes().forEach(node => {
+      const d = node.data();
+
+      if (mode === 'criticality') {
+        const crit = d.criticality || 3;
+        const color = CRITICALITY_COLORS[crit] || CRITICALITY_COLORS[3];
+        node.style({
+          'border-color': color.border,
+          'background-color': color.bg
+        });
+      } else if (mode === 'status') {
+        if (node.hasClass('status-target')) {
+          node.style({ 'border-color': '#3b82f6', 'background-color': '#1d4ed8' });
+        } else if (node.hasClass('status-BROKEN')) {
+          node.style({ 'border-color': '#ef4444', 'background-color': '#7f1d1d' });
+        } else if (node.hasClass('status-AT_RISK')) {
+          node.style({ 'border-color': '#f97316', 'background-color': '#7c2d12' });
+        } else if (node.hasClass('status-UNCERTAIN')) {
+          node.style({ 'border-color': '#eab308', 'background-color': '#713f12' });
+        } else {
+          node.style({ 'border-color': '#10b981', 'background-color': '#064e3b' });
+        }
+      } else {
+        // Default: Type
+        const typeInfo = TYPE_COLORS[d.type] || { bg: '#111827', border: '#f59e0b' };
+        node.style({
+          'border-color': typeInfo.border,
+          'background-color': typeInfo.bg
+        });
+      }
+    });
+  });
+}
+
+/**
+ * Populate Component Explorer Tree grouped by type
+ */
+function populateExplorerTree(components) {
+  const treeEl = document.getElementById('explorer-tree');
+  treeEl.innerHTML = '';
+
+  const groups = {};
+  for (const c of components) {
+    const t = c.type || 'other';
+    if (!groups[t]) groups[t] = [];
+    groups[t].push(c);
+  }
+
+  for (const [type, comps] of Object.entries(groups)) {
+    const groupDiv = document.createElement('div');
+
+    const header = document.createElement('div');
+    header.className = 'tree-group-header';
+    header.innerHTML = `<span><strong>${type.toUpperCase()}</strong> (${comps.length})</span><span>▾</span>`;
+
+    const itemsBox = document.createElement('div');
+    itemsBox.className = 'tree-group-items';
+
+    for (const c of comps) {
+      const compId = c.componentId || c.id;
+      const item = document.createElement('div');
+      item.className = 'tree-item';
+      item.dataset.id = compId;
+      item.dataset.name = (c.name || compId).toLowerCase();
+      item.innerHTML = `<span>${c.name || compId}</span><span style="color:var(--text-muted);font-size:0.6rem;">★${c.criticality || 3}</span>`;
+
+      item.addEventListener('click', () => {
+        document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('active'));
+        item.classList.add('active');
+        const node = state.cy.getElementById(compId);
+        if (node && node.length > 0) {
+          selectNode(node);
+        }
+      });
+
+      itemsBox.appendChild(item);
+    }
+
+    header.addEventListener('click', () => {
+      itemsBox.style.display = itemsBox.style.display === 'none' ? 'flex' : 'none';
+      header.querySelector('span:last-child').textContent = itemsBox.style.display === 'none' ? '▸' : '▾';
+    });
+
+    groupDiv.appendChild(header);
+    groupDiv.appendChild(itemsBox);
+    treeEl.appendChild(groupDiv);
+  }
+}
+
+/**
+ * Filter Component Explorer
+ */
+function filterExplorerTree(query) {
+  const q = query.toLowerCase().trim();
+  document.querySelectorAll('.tree-item').forEach(item => {
+    const matches = !q || item.dataset.name.includes(q) || item.dataset.id.toLowerCase().includes(q);
+    item.style.display = matches ? 'flex' : 'none';
+  });
+}
+
+/**
+ * Update 2x2 stat cards
+ */
+function updateStatCards(components, edges, simulations, uncertain) {
+  document.getElementById('stat-components').textContent = components;
+  document.getElementById('stat-edges').textContent = edges;
+  document.getElementById('stat-simulations').textContent = simulations;
+  document.getElementById('stat-uncertain').textContent = uncertain;
 }
 
 /**
@@ -463,7 +669,7 @@ function updateTargetOptions(components) {
   const filtered = components.filter(c => compatible.length === 0 || compatible.includes(c.type));
 
   if (filtered.length === 0) {
-    sel.innerHTML = '<option value="">No compatible components in graph</option>';
+    sel.innerHTML = '<option value="">No compatible components</option>';
     return;
   }
 
@@ -471,12 +677,12 @@ function updateTargetOptions(components) {
     const compId = c.componentId || c.id;
     const opt = document.createElement('option');
     opt.value = compId;
-    opt.textContent = `${c.name || compId} (${c.type}) — crit: ${c.criticality || 3}`;
+    opt.textContent = `${c.name || compId} (${c.type}) — crit:${c.criticality || 3}`;
     sel.appendChild(opt);
   }
 }
 
-// ==================== Dynamic Form Fields ====================
+// ==================== 4. Dynamic Parameter Forms ====================
 
 function setupDynamicParams() {
   const changeTypeSel = document.getElementById('change-type-select');
@@ -496,70 +702,70 @@ function renderParamFields(type) {
 
   if (type === 'RENAME_FIELD') {
     container.innerHTML = `
-      <div class="form-group">
-        <label>Current Name ('from')</label>
-        <input type="text" id="param-from" placeholder="user_name">
+      <div class="form-field">
+        <label class="form-label">Current Field Name ('from')</label>
+        <input type="text" id="param-from" class="form-input" placeholder="user_name">
       </div>
-      <div class="form-group">
-        <label>New Name ('to')</label>
-        <input type="text" id="param-to" placeholder="username">
+      <div class="form-field">
+        <label class="form-label">New Field Name ('to')</label>
+        <input type="text" id="param-to" class="form-input" placeholder="username">
       </div>
     `;
   } else if (type === 'CHANGE_FIELD_TYPE') {
     container.innerHTML = `
-      <div class="form-group">
-        <label>Current Type ('from')</label>
-        <input type="text" id="param-from" placeholder="string">
+      <div class="form-field">
+        <label class="form-label">Current Type ('from')</label>
+        <input type="text" id="param-from" class="form-input" placeholder="string">
       </div>
-      <div class="form-group">
-        <label>New Type ('to')</label>
-        <input type="text" id="param-to" placeholder="int">
+      <div class="form-field">
+        <label class="form-label">New Type ('to')</label>
+        <input type="text" id="param-to" class="form-input" placeholder="int">
       </div>
     `;
   } else if (type === 'CHANGE_CONFIG') {
     container.innerHTML = `
-      <div class="form-group">
-        <label>Config Key</label>
-        <input type="text" id="param-key" placeholder="PAYMENT_TIMEOUT">
+      <div class="form-field">
+        <label class="form-label">Config Key</label>
+        <input type="text" id="param-key" class="form-input" placeholder="PAYMENT_TIMEOUT">
       </div>
-      <div class="form-group">
-        <label>Old Value ('from')</label>
-        <input type="text" id="param-from" placeholder="30">
+      <div class="form-field">
+        <label class="form-label">Old Value ('from')</label>
+        <input type="text" id="param-from" class="form-input" placeholder="30">
       </div>
-      <div class="form-group">
-        <label>New Value ('to')</label>
-        <input type="text" id="param-to" placeholder="5">
+      <div class="form-field">
+        <label class="form-label">New Value ('to')</label>
+        <input type="text" id="param-to" class="form-input" placeholder="5">
       </div>
     `;
   } else if (type === 'UPGRADE_DEPENDENCY_MAJOR') {
     container.innerHTML = `
-      <div class="form-group">
-        <label>Current Version ('from')</label>
-        <input type="text" id="param-from" placeholder="1.x">
+      <div class="form-field">
+        <label class="form-label">Current Version ('from')</label>
+        <input type="text" id="param-from" class="form-input" placeholder="1.x">
       </div>
-      <div class="form-group">
-        <label>Target Version ('to')</label>
-        <input type="text" id="param-to" placeholder="2.x">
+      <div class="form-field">
+        <label class="form-label">Target Version ('to')</label>
+        <input type="text" id="param-to" class="form-input" placeholder="2.x">
       </div>
     `;
   } else if (type === 'CHANGE_FUNCTION_SIGNATURE') {
     container.innerHTML = `
-      <div class="form-group">
-        <label>Description of Change</label>
-        <input type="text" id="param-desc" placeholder="added required argument">
+      <div class="form-field">
+        <label class="form-label">Description of Change</label>
+        <input type="text" id="param-desc" class="form-input" placeholder="added required argument">
       </div>
     `;
   }
 }
 
-// ==================== Simulation Runner & Animation ====================
+// ==================== 5. Simulation Runner & Animated Chain Reaction ====================
 
 /**
- * Execute What-If simulation against current version
+ * Execute What-If simulation
  */
 async function runSimulation() {
   if (!state.currentVersion) {
-    showToast('Please select a graph version first.', 'error');
+    showToast('Please load a graph version first.', 'error');
     return;
   }
 
@@ -571,7 +777,6 @@ async function runSimulation() {
     return;
   }
 
-  // Build params
   const params = {};
   const fromEl = document.getElementById('param-from');
   const toEl = document.getElementById('param-to');
@@ -585,7 +790,7 @@ async function runSimulation() {
 
   const btn = document.getElementById('btn-simulate');
   btn.disabled = true;
-  btn.innerHTML = '<span>⏳</span> Simulating Impact...';
+  btn.innerHTML = '<span>⏳</span> Simulating...';
 
   try {
     const res = await fetch(`/api/versions/${encodeURIComponent(state.currentVersion)}/simulate`, {
@@ -602,50 +807,62 @@ async function runSimulation() {
 
     state.lastSimulation = data;
 
-    // Display report
+    // Render Impact Report & Score Ring
     renderReport(data);
 
-    // Switch to Report tab
-    switchTab('tab-report');
+    // Switch to Impact Tab
+    switchTab('tab-impact');
 
-    // Animate Chain Reaction in Cytoscape!
-    animateChainReaction(targetId, data.affected, data.chains);
+    // Run Animated Chain Reaction with Ripple Pulse!
+    animateChainReaction(targetId, data.affected || [], data.chains || []);
 
-    // Refresh history & analytics
+    // Refresh history, stats & analytics
     if (state.currentProject) {
       loadHistory(state.currentProject);
       loadAnalytics(state.currentProject);
     }
 
-    showToast(data.status === 'cached' ? '⚡ Cached result returned (idempotent)' : 'Simulation completed successfully!', 'success');
+    showToast(data.status === 'cached' ? '⚡ Cached result (idempotent)' : 'Simulation completed!', 'success');
   } catch (err) {
     showToast('Simulation error: ' + err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<span>🚀</span> Run Impact Simulation';
+    btn.innerHTML = '<span>🚀</span> Simulate Change Impact';
   }
 }
 
 /**
- * Animate the chain reaction level-by-level (depth 1, then depth 2, etc.)
+ * Animate chain reaction level-by-level with a ripple pulse from the target
  */
 function animateChainReaction(targetId, affected, chains) {
   if (!state.cy) return;
 
-  // Reset node classes
+  // Clear previous statuses
   state.cy.nodes().removeClass('status-target status-BROKEN status-AT_RISK status-UNCERTAIN status-SAFE');
   state.cy.edges().removeClass('highlighted-path');
 
-  // Mark all unreached nodes as SAFE (dimmed green)
+  // Mark unreached nodes as SAFE
   state.cy.nodes().addClass('status-SAFE');
 
-  // Highlight target node
+  // Highlight target node with pulse effect
   const targetNode = state.cy.getElementById(targetId);
   if (targetNode) {
     targetNode.removeClass('status-SAFE').addClass('status-target');
+
+    // Ripple pulse animation on target
+    targetNode.animate({
+      style: { 'width': 54, 'height': 54 }
+    }, {
+      duration: 200,
+      complete: () => {
+        targetNode.animate({
+          style: { 'width': 44, 'height': 44 }
+        }, { duration: 250 });
+      }
+    });
   }
 
-  // Group affected by depth
+  // Group affected nodes by depth
   const byDepth = new Map();
   for (const a of affected) {
     const d = a.depth || 1;
@@ -653,7 +870,7 @@ function animateChainReaction(targetId, affected, chains) {
     byDepth.get(d).push(a);
   }
 
-  // Animation banner
+  // Show HUD banner
   const banner = document.getElementById('animation-banner');
   const stageText = document.getElementById('anim-stage-text');
   banner.style.display = 'flex';
@@ -663,15 +880,15 @@ function animateChainReaction(targetId, affected, chains) {
 
   function revealNextDepth() {
     if (step >= depths.length) {
-      stageText.textContent = `Completed: ${affected.length} components affected.`;
-      setTimeout(() => { banner.style.display = 'none'; }, 2000);
-      document.getElementById('btn-replay-anim').style.display = 'inline-flex';
+      stageText.textContent = `Completed (${affected.length} affected)`;
+      setTimeout(() => { banner.style.display = 'none'; }, 2200);
+      document.getElementById('chip-affected-count').textContent = `${affected.length} affected`;
       return;
     }
 
     const d = depths[step];
     const items = byDepth.get(d);
-    stageText.textContent = `Propagating Depth ${d}: ${items.length} component(s) impacted...`;
+    stageText.textContent = `Depth ${d}: ${items.length} component(s) impacted...`;
 
     for (const a of items) {
       const node = state.cy.getElementById(a.componentId);
@@ -679,16 +896,26 @@ function animateChainReaction(targetId, affected, chains) {
         node.removeClass('status-SAFE');
         node.addClass(`status-${a.status}`);
 
-        // Attach simulation details to node data for click flyout
+        // Attach simulation info for flyouts
         node.data({
           simulationStatus: a.status,
           simulationDepth: a.depth,
           simulationReason: a.reason,
           simulationRecommendation: a.recommendation
         });
+
+        // Subtle pulse on reveal
+        node.animate({
+          style: { 'width': 46, 'height': 46 }
+        }, {
+          duration: 150,
+          complete: () => {
+            node.animate({ style: { 'width': 38, 'height': 38 } }, { duration: 150 });
+          }
+        });
       }
 
-      // Highlight path edges leading to this component
+      // Highlight path edges
       if (a.path && a.path.length >= 2) {
         for (let i = 0; i < a.path.length - 1; i++) {
           const from = a.path[i];
@@ -699,95 +926,139 @@ function animateChainReaction(targetId, affected, chains) {
     }
 
     step++;
-    setTimeout(revealNextDepth, 600);
+    setTimeout(revealNextDepth, 550);
   }
 
   revealNextDepth();
 }
 
 /**
- * Render Report Tab
+ * Render Impact Report, Score Ring, and Accordions
  */
 function renderReport(sim) {
-  const scoreEl = document.getElementById('gauge-score');
-  const labelEl = document.getElementById('gauge-label');
+  const score = sim.score || 0;
+  const label = sim.label || 'LOW';
+
+  // 1. Update Score Ring in Left Sidebar
+  const ringProgress = document.getElementById('score-ring-progress');
+  const ringVal = document.getElementById('ring-score-val');
+  const ringLbl = document.getElementById('ring-score-lbl');
+  const cachedPillLeft = document.getElementById('cached-pill-left');
+
+  const circumference = 282.74; // 2 * PI * 45
+  const offset = circumference - (score / 100) * circumference;
+  ringProgress.style.strokeDashoffset = offset;
+
+  const scoreColor = score >= 75 ? '#ef4444' :
+                     score >= 50 ? '#f97316' :
+                     score >= 25 ? '#eab308' : '#10b981';
+
+  ringProgress.style.stroke = scoreColor;
+  ringVal.textContent = score;
+  ringVal.style.color = scoreColor;
+  ringLbl.textContent = `${label} IMPACT`;
+  ringLbl.style.color = scoreColor;
+  cachedPillLeft.style.display = sim.status === 'cached' ? 'inline' : 'none';
+
+  // 2. Update Impact Tab Header & Progress Bar
+  const changeHeader = document.getElementById('impact-change-header');
   const cachedBadge = document.getElementById('cached-badge');
+  const scoreText = document.getElementById('impact-score-text');
+  const badgeLabel = document.getElementById('impact-badge-label');
+  const progressBarFill = document.getElementById('impact-progress-bar-fill');
+  const depthLine = document.getElementById('propagate-depth-line');
 
-  scoreEl.textContent = sim.score;
-  scoreEl.className = 'gauge-score-display ' +
-    (sim.score >= 75 ? 'score-critical' :
-     sim.score >= 50 ? 'score-high' :
-     sim.score >= 25 ? 'score-medium' : 'score-low');
-
-  labelEl.textContent = `${sim.label} IMPACT`;
-  labelEl.className = 'gauge-label ' +
-    (sim.score >= 75 ? 'badge-critical' :
-     sim.score >= 50 ? 'badge-high' :
-     sim.score >= 25 ? 'badge-medium' : 'badge-low');
-
+  changeHeader.textContent = `${sim.change?.type || 'Change'} on ${sim.change?.targetId || 'target'}`;
   cachedBadge.style.display = sim.status === 'cached' ? 'inline-block' : 'none';
 
-  // Counts
-  document.getElementById('count-broken').textContent = sim.counts?.broken ?? 0;
-  document.getElementById('count-at-risk').textContent = sim.counts?.atRisk ?? 0;
-  document.getElementById('count-uncertain').textContent = sim.counts?.uncertain ?? 0;
-  document.getElementById('count-safe').textContent = sim.counts?.safe ?? 0;
+  scoreText.textContent = `${score} / 100`;
+  scoreText.style.color = scoreColor;
 
-  // Affected list
-  const listEl = document.getElementById('affected-list');
+  badgeLabel.textContent = `${label} IMPACT`;
+  badgeLabel.className = `status-badge ${score >= 75 ? 'badge-broken' : score >= 50 ? 'badge-at_risk' : score >= 25 ? 'badge-uncertain' : 'badge-safe'}`;
+
+  progressBarFill.style.width = `${score}%`;
+  progressBarFill.style.background = scoreColor;
+
+  const maxDepth = Math.max(1, ...(sim.affected || []).map(a => a.depth || 1));
+  depthLine.textContent = `Changes propagate up to ${maxDepth} level${maxDepth > 1 ? 's' : ''} deep`;
+
+  // 3. Update Stat Cards
+  const uncertainCount = (sim.affected || []).filter(a => a.status === 'UNCERTAIN').length;
+  updateStatCards(
+    state.graphData?.components?.length || 0,
+    state.graphData?.edges?.length || 0,
+    document.querySelectorAll('.history-row').length + 1,
+    uncertainCount
+  );
+
+  // 4. Affected Components List & Uncertain Section
+  const affectedList = document.getElementById('affected-list');
+  const uncertainList = document.getElementById('uncertain-list');
   const uncertainSection = document.getElementById('uncertain-section');
-  const uncertainListEl = document.getElementById('uncertain-list');
 
-  listEl.innerHTML = '';
-  uncertainListEl.innerHTML = '';
+  affectedList.innerHTML = '';
+  uncertainList.innerHTML = '';
 
   const uncertainItems = (sim.affected || []).filter(a => a.status === 'UNCERTAIN');
   if (uncertainItems.length > 0) {
     uncertainSection.style.display = 'block';
     for (const u of uncertainItems) {
-      uncertainListEl.appendChild(createAffectedCard(u));
+      uncertainList.appendChild(createAffectedRow(u));
     }
   } else {
     uncertainSection.style.display = 'none';
   }
 
-  document.getElementById('affected-count-badge').textContent = `${(sim.affected || []).length} found`;
+  document.getElementById('affected-count-tag').textContent = `${(sim.affected || []).length} items`;
 
   for (const a of (sim.affected || [])) {
-    listEl.appendChild(createAffectedCard(a));
+    affectedList.appendChild(createAffectedRow(a));
+  }
+
+  // 5. Populate Dependency Chains
+  const chainsBox = document.getElementById('chains-list-box');
+  if (sim.chains && sim.chains.length > 0) {
+    chainsBox.innerHTML = sim.chains.slice(0, 15).map(c => `<div style="padding:0.2rem 0;">• ${c.join(' → ')}</div>`).join('');
+  } else {
+    chainsBox.innerHTML = '<div style="color:var(--text-muted);">No propagation chains recorded.</div>';
+  }
+
+  // Auto-populate accordion with first broken node if available
+  const firstBroken = (sim.affected || []).find(a => a.status === 'BROKEN') || (sim.affected || [])[0];
+  if (firstBroken) {
+    populateAccordionDetails(firstBroken);
   }
 }
 
-function createAffectedCard(item) {
-  const card = document.createElement('div');
-  card.className = `affected-item ${item.status}`;
-  card.innerHTML = `
-    <div class="affected-header">
-      <span class="affected-name">${item.name || item.componentId}</span>
-      <span class="affected-status-badge badge-${item.status === 'BROKEN' ? 'critical' : item.status === 'AT_RISK' ? 'high' : 'medium'}">${item.status} (d:${item.depth})</span>
+function createAffectedRow(item) {
+  const row = document.createElement('div');
+  row.className = `affected-row-card ${item.status}`;
+  const badgeClass = item.status === 'BROKEN' ? 'badge-broken' : item.status === 'AT_RISK' ? 'badge-at_risk' : 'badge-uncertain';
+
+  row.innerHTML = `
+    <div class="affected-row-header">
+      <span class="affected-row-name">${item.name || item.componentId}</span>
+      <span class="status-badge ${badgeClass}">${item.status} (d:${item.depth})</span>
     </div>
-    <div class="affected-reason">${item.reason || 'Impacted via dependency propagation'}</div>
-    <div class="affected-rec">💡 <strong>Action:</strong> ${item.recommendation || 'Verify behavior'}</div>
-    ${item.path ? `<div style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-muted);margin-top:0.3rem;">Path: ${item.path.join(' → ')}</div>` : ''}
+    <div class="affected-row-sub">${item.reason || 'Impacted via dependency propagation'}</div>
+    <div style="font-size:0.65rem;color:var(--accent-green);margin-top:0.15rem;">💡 ${item.recommendation || 'Verify behavior'}</div>
   `;
 
-  card.addEventListener('click', () => {
-    if (state.cy) {
-      const node = state.cy.getElementById(item.componentId);
-      if (node && node.length > 0) {
-        state.cy.animate({ center: { eles: node }, zoom: 1.5 }, { duration: 400 });
-        showNodeFlyout({ ...node.data(), simulationStatus: item.status, simulationDepth: item.depth, simulationReason: item.reason, simulationRecommendation: item.recommendation });
-      }
+  row.addEventListener('click', () => {
+    const node = state.cy.getElementById(item.componentId);
+    if (node && node.length > 0) {
+      selectNode(node);
     }
   });
 
-  return card;
+  return row;
 }
 
-// ==================== History & Comparison ====================
+// ==================== 6. History & Side-by-Side Compare ====================
 
 /**
- * Load simulation history for project
+ * Load simulation history
  */
 async function loadHistory(projectId) {
   const list = document.getElementById('history-list');
@@ -800,37 +1071,36 @@ async function loadHistory(projectId) {
     updateCompareButton();
 
     if (history.length === 0) {
-      list.innerHTML = '<div style="font-size:0.75rem;color:var(--text-muted);text-align:center;padding:1rem;">No simulations yet.</div>';
+      list.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:0.75rem;">No simulations yet.</div>';
       return;
     }
 
     for (const h of history) {
-      const item = document.createElement('div');
-      item.className = 'history-item';
+      const row = document.createElement('div');
+      row.className = 'history-row';
+      const desc = `${h.change?.type}: ${h.change?.targetId?.split('.').pop() || h.change?.targetId}`;
+      const time = new Date(h.createdAt).toLocaleTimeString();
 
-      const changeSummary = `${h.change?.type}: ${h.change?.targetId}`;
-      const dateStr = new Date(h.createdAt).toLocaleTimeString();
-
-      item.innerHTML = `
-        <div style="display:flex;align-items:center;gap:0.5rem;">
+      row.innerHTML = `
+        <div style="display:flex;align-items:center;gap:0.4rem;">
           <input type="checkbox" class="history-checkbox" data-id="${h._id}">
           <div>
-            <div style="font-size:0.78rem;font-weight:600;">${changeSummary}</div>
-            <div style="font-size:0.68rem;color:var(--text-muted);">${dateStr}</div>
+            <div style="font-weight:600;font-size:0.75rem;">${desc}</div>
+            <div style="font-size:0.65rem;color:var(--text-muted);font-family:var(--font-mono);">${time}</div>
           </div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:0.9rem;font-weight:700;font-family:var(--font-mono);" class="${h.score >= 50 ? 'score-high' : 'score-low'}">${h.score}</div>
-          <div style="font-size:0.65rem;color:var(--text-muted);">${h.label}</div>
+          <div style="font-weight:700;font-family:var(--font-mono);color:${h.score >= 50 ? '#f97316' : '#10b981'};">${h.score}</div>
+          <div style="font-size:0.62rem;color:var(--text-muted);">${h.label}</div>
         </div>
       `;
 
-      const cb = item.querySelector('.history-checkbox');
+      const cb = row.querySelector('.history-checkbox');
       cb.addEventListener('change', (e) => {
         if (e.target.checked) {
           if (state.selectedHistory.size >= 2) {
             e.target.checked = false;
-            showToast('You can select at most 2 simulations to compare.', 'info');
+            showToast('You can compare at most 2 simulations.', 'info');
             return;
           }
           state.selectedHistory.add(h._id);
@@ -840,21 +1110,21 @@ async function loadHistory(projectId) {
         updateCompareButton();
       });
 
-      list.appendChild(item);
+      list.appendChild(row);
     }
   } catch (err) {
-    list.innerHTML = `<div style="color:var(--status-broken);font-size:0.75rem;">Error loading history: ${err.message}</div>`;
+    list.innerHTML = `<div style="color:var(--status-broken);font-size:0.7rem;">Error: ${err.message}</div>`;
   }
 }
 
 function updateCompareButton() {
   const btn = document.getElementById('btn-compare');
   btn.disabled = state.selectedHistory.size !== 2;
-  btn.textContent = `Compare (${state.selectedHistory.size}/2 Selected)`;
+  btn.textContent = `Compare (${state.selectedHistory.size}/2)`;
 }
 
 /**
- * Execute Compare via /api/compare?a=...&b=...
+ * Open Side-by-Side Comparison Modal
  */
 async function openCompareModal() {
   if (state.selectedHistory.size !== 2) return;
@@ -863,53 +1133,52 @@ async function openCompareModal() {
   const modal = document.getElementById('modal-compare');
   const body = document.getElementById('compare-modal-body');
   modal.style.display = 'flex';
-  body.innerHTML = '<div style="text-align:center;padding:2rem;">Running MongoDB Aggregation comparison...</div>';
+  body.innerHTML = '<div style="text-align:center;padding:1.5rem;color:var(--text-secondary);">Executing MongoDB Aggregation comparison...</div>';
 
   try {
     const res = await fetch(`/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
     const comp = await res.json();
-    if (!res.ok) throw new Error(comp.error || 'Failed to compare');
+    if (!res.ok) throw new Error(comp.error || 'Comparison failed');
 
     body.innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem;">
-        <div class="panel-section">
-          <div style="font-size:0.75rem;color:var(--text-muted);">Simulation A</div>
-          <div style="font-size:0.85rem;font-weight:700;">${comp.simulationA.change?.type} (${comp.simulationA.change?.targetId})</div>
-          <div style="font-size:1.5rem;font-weight:800;margin-top:0.3rem;" class="${comp.simulationA.score >= 50 ? 'score-high' : 'score-low'}">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.85rem;margin-bottom:1rem;">
+        <div class="panel-card">
+          <div style="font-size:0.7rem;color:var(--text-muted);">Simulation A</div>
+          <div style="font-size:0.8rem;font-weight:700;font-family:var(--font-mono);">${comp.simulationA.change?.type} (${comp.simulationA.change?.targetId})</div>
+          <div style="font-size:1.3rem;font-weight:800;font-family:var(--font-mono);margin-top:0.25rem;color:${comp.simulationA.score >= 50 ? '#f97316' : '#10b981'};">
             Score: ${comp.simulationA.score} (${comp.simulationA.label})
           </div>
         </div>
-        <div class="panel-section">
-          <div style="font-size:0.75rem;color:var(--text-muted);">Simulation B</div>
-          <div style="font-size:0.85rem;font-weight:700;">${comp.simulationB.change?.type} (${comp.simulationB.change?.targetId})</div>
-          <div style="font-size:1.5rem;font-weight:800;margin-top:0.3rem;" class="${comp.simulationB.score >= 50 ? 'score-high' : 'score-low'}">
+        <div class="panel-card">
+          <div style="font-size:0.7rem;color:var(--text-muted);">Simulation B</div>
+          <div style="font-size:0.8rem;font-weight:700;font-family:var(--font-mono);">${comp.simulationB.change?.type} (${comp.simulationB.change?.targetId})</div>
+          <div style="font-size:1.3rem;font-weight:800;font-family:var(--font-mono);margin-top:0.25rem;color:${comp.simulationB.score >= 50 ? '#f97316' : '#10b981'};">
             Score: ${comp.simulationB.score} (${comp.simulationB.label})
           </div>
         </div>
       </div>
 
-      <div style="text-align:center;margin-bottom:1rem;padding:0.5rem;background:rgba(56,189,248,0.1);border-radius:6px;">
+      <div style="text-align:center;padding:0.4rem;background:rgba(25,230,161,0.1);border-radius:var(--radius-sm);margin-bottom:1rem;font-size:0.78rem;">
         <strong>Score Difference:</strong> ${comp.scoreDifference > 0 ? `+${comp.scoreDifference} (A higher)` : `${comp.scoreDifference} (B higher)`}
       </div>
 
-      <!-- Set differences -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem;">
-        <div class="panel-section">
-          <div class="section-title">Only in A (${comp.counts.onlyInA})</div>
-          <div style="max-height:150px;overflow-y:auto;font-size:0.75rem;">
-            ${comp.onlyInA.length ? comp.onlyInA.map(x => `<div style="padding:0.2rem 0;color:var(--status-broken);">${x.name || x.componentId} (${x.status})</div>`).join('') : '<div style="color:var(--text-muted);">None</div>'}
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.6rem;">
+        <div class="panel-card">
+          <div class="panel-card-title">Only in A (${comp.counts.onlyInA})</div>
+          <div style="max-height:130px;overflow-y:auto;font-size:0.7rem;font-family:var(--font-mono);">
+            ${comp.onlyInA.length ? comp.onlyInA.map(x => `<div style="padding:0.15rem 0;color:#ef4444;">${x.name || x.componentId} (${x.status})</div>`).join('') : '<div style="color:var(--text-muted);">None</div>'}
           </div>
         </div>
-        <div class="panel-section">
-          <div class="section-title">In Both (${comp.counts.inBoth})</div>
-          <div style="max-height:150px;overflow-y:auto;font-size:0.75rem;">
-            ${comp.inBoth.length ? comp.inBoth.map(x => `<div style="padding:0.2rem 0;">${x.name || x.componentId} <span style="font-size:0.65rem;color:var(--text-muted);">(A:${x.statusA} / B:${x.statusB})</span></div>`).join('') : '<div style="color:var(--text-muted);">None</div>'}
+        <div class="panel-card">
+          <div class="panel-card-title">In Both (${comp.counts.inBoth})</div>
+          <div style="max-height:130px;overflow-y:auto;font-size:0.7rem;font-family:var(--font-mono);">
+            ${comp.inBoth.length ? comp.inBoth.map(x => `<div style="padding:0.15rem 0;">${x.name || x.componentId} <span style="font-size:0.62rem;color:var(--text-muted);">(A:${x.statusA}/B:${x.statusB})</span></div>`).join('') : '<div style="color:var(--text-muted);">None</div>'}
           </div>
         </div>
-        <div class="panel-section">
-          <div class="section-title">Only in B (${comp.counts.onlyInB})</div>
-          <div style="max-height:150px;overflow-y:auto;font-size:0.75rem;">
-            ${comp.onlyInB.length ? comp.onlyInB.map(x => `<div style="padding:0.2rem 0;color:var(--status-broken);">${x.name || x.componentId} (${x.status})</div>`).join('') : '<div style="color:var(--text-muted);">None</div>'}
+        <div class="panel-card">
+          <div class="panel-card-title">Only in B (${comp.counts.onlyInB})</div>
+          <div style="max-height:130px;overflow-y:auto;font-size:0.7rem;font-family:var(--font-mono);">
+            ${comp.onlyInB.length ? comp.onlyInB.map(x => `<div style="padding:0.15rem 0;color:#ef4444;">${x.name || x.componentId} (${x.status})</div>`).join('') : '<div style="color:var(--text-muted);">None</div>'}
           </div>
         </div>
       </div>
@@ -919,7 +1188,7 @@ async function openCompareModal() {
   }
 }
 
-// ==================== MongoDB Analytics ====================
+// ==================== 7. MongoDB Analytics (Chart.js) ====================
 
 /**
  * Load Analytics from /api/projects/:id/analytics
@@ -929,37 +1198,37 @@ async function loadAnalytics(projectId) {
     const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/analytics`);
     const data = await res.json();
 
-    // 1. Chart.js Blast Radius Rankings
+    // Chart.js Blast Radius Rankings
     renderBlastChart(data.blastRankings || []);
 
-    // 2. Fragile Components Table
+    // Fragile Components Table
     const fragileTbody = document.querySelector('#fragile-table tbody');
     fragileTbody.innerHTML = '';
     if (!data.fragileComponents || data.fragileComponents.length === 0) {
-      fragileTbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);">No simulation data</td></tr>';
+      fragileTbody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);text-align:center;">No data</td></tr>';
     } else {
       for (const fc of data.fragileComponents) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td><strong>${fc.name || fc.componentId}</strong> (${fc.type})</td>
-          <td>${fc.impactCount} times</td>
-          <td><span class="badge-${fc.worstStatus === 'BROKEN' ? 'critical' : 'high'}" style="font-size:0.65rem;padding:0.15rem 0.4rem;border-radius:4px;">${fc.worstStatus}</span></td>
+          <td><strong>${fc.name || fc.componentId}</strong></td>
+          <td>${fc.impactCount}</td>
+          <td><span class="status-badge ${fc.worstStatus === 'BROKEN' ? 'badge-broken' : 'badge-at_risk'}">${fc.worstStatus}</span></td>
         `;
         fragileTbody.appendChild(tr);
       }
     }
 
-    // 3. Hotspots Table
+    // Hotspots Table
     const hotTbody = document.querySelector('#hotspots-table tbody');
     hotTbody.innerHTML = '';
     if (!data.hotspots || data.hotspots.length === 0) {
-      hotTbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-muted);">No edge data</td></tr>';
+      hotTbody.innerHTML = '<tr><td colspan="2" style="color:var(--text-muted);text-align:center;">No data</td></tr>';
     } else {
       for (const h of data.hotspots) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td><strong>${h.name || h.componentId}</strong></td>
-          <td>${h.dependentsCount} consumers</td>
+          <td>${h.dependentsCount}</td>
         `;
         hotTbody.appendChild(tr);
       }
@@ -975,7 +1244,7 @@ function renderBlastChart(rankings) {
 
   const labels = rankings.map(r => `${r.change?.type?.replace('_FIELD', '') || 'Sim'} (${r.change?.targetId?.split('.').pop() || ''})`);
   const scores = rankings.map(r => r.score);
-  const colors = rankings.map(r => r.score >= 75 ? '#ef4444' : r.score >= 50 ? '#f97316' : r.score >= 25 ? '#eab308' : '#10b981');
+  const colors = rankings.map(r => r.score >= 75 ? '#ef4444' : r.score >= 50 ? '#f97316' : r.score >= 25 ? '#eab308' : '#19e6a1');
 
   if (state.chart) {
     state.chart.destroy();
@@ -986,10 +1255,10 @@ function renderBlastChart(rankings) {
     data: {
       labels: labels.length ? labels : ['No Data'],
       datasets: [{
-        label: 'Blast Radius Score',
+        label: 'Blast Score',
         data: scores.length ? scores : [0],
-        backgroundColor: colors.length ? colors : ['#475569'],
-        borderRadius: 4
+        backgroundColor: colors.length ? colors : ['#334155'],
+        borderRadius: 3
       }]
     },
     options: {
@@ -999,12 +1268,12 @@ function renderBlastChart(rankings) {
         y: {
           min: 0,
           max: 100,
-          grid: { color: 'rgba(148, 163, 184, 0.1)' },
-          ticks: { color: '#94a3b8', font: { size: 10 } }
+          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          ticks: { color: '#64748b', font: { size: 9 } }
         },
         x: {
           grid: { display: false },
-          ticks: { color: '#94a3b8', font: { size: 9 }, maxRotation: 45 }
+          ticks: { color: '#94a3b8', font: { size: 8.5 }, maxRotation: 40 }
         }
       },
       plugins: {
@@ -1015,77 +1284,75 @@ function renderBlastChart(rankings) {
 }
 
 /**
- * Load events for project
+ * Load past events
  */
 async function loadEvents(projectId) {
   try {
     const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/events`);
     const events = await res.json();
-    const list = document.getElementById('events-stream-list');
-    list.innerHTML = '';
+    const feed = document.getElementById('compact-event-feed');
+    feed.innerHTML = '';
     for (const ev of events) {
       addEventToFeed(ev, false);
     }
-  } catch (err) {
-    console.warn('Failed to load past events:', err);
-  }
+  } catch (err) {}
 }
 
-// ==================== UI Event Listeners ====================
+// ==================== 8. UI Event Listeners & Presets ====================
 
 function setupEventListeners() {
-  // Project & Version selects
-  document.getElementById('project-select').addEventListener('change', (e) => {
-    onProjectChange(e.target.value);
+  // Brand Home Click
+  document.getElementById('brand-home-link').addEventListener('click', resetGraphView);
+  document.getElementById('btn-reset-view').addEventListener('click', resetGraphView);
+
+  // Project / Version Dropdowns
+  document.getElementById('project-select').addEventListener('change', (e) => onProjectChange(e.target.value));
+  document.getElementById('version-select').addEventListener('change', (e) => onVersionChange(e.target.value));
+
+  // Color By
+  document.getElementById('color-by-select').addEventListener('change', (e) => applyColorBy(e.target.value));
+
+  // Toolbar View Pills (Layout Switcher)
+  document.querySelectorAll('.layout-pill-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.layout-pill-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      applyLayout(btn.dataset.layout);
+    });
   });
 
-  document.getElementById('version-select').addEventListener('change', (e) => {
-    onVersionChange(e.target.value);
+  // Toolbar Actions
+  document.getElementById('btn-zoom-in').addEventListener('click', () => {
+    if (state.cy) state.cy.zoom(state.cy.zoom() * 1.25);
   });
-
-  // Fit graph button
+  document.getElementById('btn-zoom-out').addEventListener('click', () => {
+    if (state.cy) state.cy.zoom(state.cy.zoom() * 0.8);
+  });
   document.getElementById('btn-fit-graph').addEventListener('click', () => {
-    if (state.cy) state.cy.fit(undefined, 40);
+    if (state.cy) state.cy.fit(undefined, 35);
+  });
+  document.getElementById('btn-reset-layout').addEventListener('click', () => {
+    applyLayout(state.activeLayout);
   });
 
-  // Layout change
-  document.getElementById('layout-select').addEventListener('change', () => {
-    applyLayout();
-  });
-
-  // Replay animation button
-  document.getElementById('btn-replay-anim').addEventListener('click', () => {
-    if (state.lastSimulation) {
-      animateChainReaction(
-        state.lastSimulation.change?.targetId,
-        state.lastSimulation.affected || [],
-        state.lastSimulation.chains || []
-      );
-    }
-  });
-
-  // Close flyout
+  // Flyout Close
   document.getElementById('btn-close-flyout').addEventListener('click', () => {
     document.getElementById('node-flyout').style.display = 'none';
+  });
+
+  // Explorer Search & Clear
+  const searchInput = document.getElementById('explorer-search');
+  searchInput.addEventListener('input', (e) => filterExplorerTree(e.target.value));
+  document.getElementById('btn-clear-filter').addEventListener('click', () => {
+    searchInput.value = '';
+    filterExplorerTree('');
   });
 
   // Simulate Button
   document.getElementById('btn-simulate').addEventListener('click', runSimulation);
 
   // Download Report Button
-  document.getElementById('btn-download-report').addEventListener('click', () => {
-    if (!state.lastSimulation) {
-      showToast('No simulation report to download.', 'info');
-      return;
-    }
-    const blob = new Blob([JSON.stringify(state.lastSimulation, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bugbound-report-${state.lastSimulation.simulationId || 'sim'}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  });
+  document.getElementById('btn-download-report').addEventListener('click', downloadReportJSON);
 
   // Compare Button
   document.getElementById('btn-compare').addEventListener('click', openCompareModal);
@@ -1093,53 +1360,28 @@ function setupEventListeners() {
     document.getElementById('modal-compare').style.display = 'none';
   });
 
-  // New Project Modal
-  document.getElementById('btn-new-project').addEventListener('click', () => {
-    document.getElementById('modal-new-project').style.display = 'flex';
-  });
-  document.getElementById('btn-close-project-modal').addEventListener('click', () => {
-    document.getElementById('modal-new-project').style.display = 'none';
-  });
-  document.getElementById('btn-cancel-project').addEventListener('click', () => {
-    document.getElementById('modal-new-project').style.display = 'none';
-  });
-  document.getElementById('btn-create-project-submit').addEventListener('click', async () => {
-    const input = document.getElementById('new-project-name');
-    const name = input.value.trim();
-    if (!name) return;
-
-    try {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create project');
-
-      document.getElementById('modal-new-project').style.display = 'none';
-      input.value = '';
-      showToast(`Project "${name}" created!`, 'success');
-      await loadProjects(name);
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  });
-
   // Tab switching
-  document.querySelectorAll('.tab-btn').forEach(btn => {
+  document.querySelectorAll('.tab-nav-btn').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
-  // Presets
-  document.querySelectorAll('.preset-chip').forEach(chip => {
+  // Demo Presets
+  document.querySelectorAll('.scenario-chip').forEach(chip => {
     chip.addEventListener('click', () => applyPreset(chip.dataset.preset));
   });
 
-  // One-Click Demo Buttons
+  // Demo Actions
   document.getElementById('btn-seed-demo').addEventListener('click', handleSeedDemo);
   document.getElementById('btn-upload-v2').addEventListener('click', handleUploadV2);
   document.getElementById('btn-upload-invalid').addEventListener('click', handleUploadInvalid);
+
+  // File Upload
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('manifest-file-input');
+  dropZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length) uploadManifestFile(e.target.files[0]);
+  });
 
   // Scanner Modal (Step 9)
   const scannerModal = document.getElementById('modal-scanner');
@@ -1152,76 +1394,67 @@ function setupEventListeners() {
   document.getElementById('btn-cancel-scanner').addEventListener('click', () => {
     scannerModal.style.display = 'none';
   });
-  document.getElementById('btn-submit-scanner').addEventListener('click', async () => {
-    const path = document.getElementById('scanner-path').value.trim() || 'src/App.js';
-    const content = document.getElementById('scanner-content').value;
-    const btn = document.getElementById('btn-submit-scanner');
-    btn.disabled = true;
-    btn.textContent = 'Scanning...';
+  document.getElementById('btn-submit-scanner').addEventListener('click', handleScanSubmit);
 
-    try {
-      const scanRes = await fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files: [{ path, content }] })
-      });
-      const scanData = await scanRes.json();
-      if (!scanRes.ok) throw new Error(scanData.error || 'Scan failed');
-
-      // Upload the generated manifest to current project or a project named "Scanned Project"
-      const targetProj = state.currentProject || 'Scanned Project';
-      const uploadRes = await fetch(`/api/projects/${encodeURIComponent(targetProj)}/manifest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(scanData.manifest)
-      });
-      const uploadData = await uploadRes.json();
-
-      scannerModal.style.display = 'none';
-      showToast(`Scanned snippet: generated ${scanData.componentCount} components and ${scanData.edgeCount} edges!`, 'success');
-      await loadProjects(targetProj);
-      if (uploadData.versionId) {
-        await loadVersions(targetProj, uploadData.versionId);
-      }
-    } catch (err) {
-      showToast('Scanner error: ' + err.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = '🔍 Scan & Load Manifest';
-    }
+  // New Project Modal
+  const projectModal = document.getElementById('modal-new-project');
+  document.getElementById('btn-new-project').addEventListener('click', () => {
+    projectModal.style.display = 'flex';
   });
-
-  // File Dropzone & Upload
-  const dropZone = document.getElementById('drop-zone');
-  const fileInput = document.getElementById('manifest-file-input');
-
-  dropZone.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => {
-    if (e.target.files.length) uploadManifestFile(e.target.files[0]);
+  document.getElementById('btn-close-project-modal').addEventListener('click', () => {
+    projectModal.style.display = 'none';
   });
-
-  dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.style.borderColor = 'var(--accent-cyan)';
+  document.getElementById('btn-cancel-project').addEventListener('click', () => {
+    projectModal.style.display = 'none';
   });
-  dropZone.addEventListener('dragleave', () => {
-    dropZone.style.borderColor = 'var(--border-color)';
-  });
-  dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.style.borderColor = 'var(--border-color)';
-    if (e.dataTransfer.files.length) {
-      uploadManifestFile(e.dataTransfer.files[0]);
-    }
-  });
+  document.getElementById('btn-create-project-submit').addEventListener('click', handleCreateProjectSubmit);
 }
 
 function switchTab(tabId) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === tabId));
+  document.querySelectorAll('.tab-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === tabId));
 }
 
-// Preset Handlers
+function setupAccordions() {
+  const setupAccordion = (headerId, contentId) => {
+    const h = document.getElementById(headerId);
+    const c = document.getElementById(contentId);
+    h.addEventListener('click', () => {
+      const open = c.style.display === 'block';
+      c.style.display = open ? 'none' : 'block';
+      h.querySelector('span:last-child').textContent = open ? '▾' : '▴';
+    });
+  };
+
+  setupAccordion('acc-header-reasons', 'acc-content-reasons');
+  setupAccordion('acc-header-chains', 'acc-content-chains');
+  setupAccordion('acc-header-connections', 'acc-content-connections');
+}
+
+function resetGraphView() {
+  if (state.cy) {
+    state.cy.fit(undefined, 40);
+    state.cy.nodes().removeClass('status-target status-BROKEN status-AT_RISK status-UNCERTAIN status-SAFE');
+    state.cy.edges().removeClass('highlighted-path');
+    applyColorBy(state.colorBy);
+    document.getElementById('node-flyout').style.display = 'none';
+  }
+}
+
+function downloadReportJSON() {
+  if (!state.lastSimulation) {
+    showToast('No active simulation report.', 'info');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(state.lastSimulation, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bugbound-report-${state.lastSimulation.simulationId || 'sim'}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function applyPreset(preset) {
   const typeSel = document.getElementById('change-type-select');
   const targetSel = document.getElementById('target-component-select');
@@ -1263,12 +1496,12 @@ function applyPreset(preset) {
   }
 }
 
-// ==================== Demo & Manifest Upload Handlers ====================
+// ==================== 9. Handlers for Demo & File Uploads ====================
 
 async function handleSeedDemo() {
   const btn = document.getElementById('btn-seed-demo');
   btn.disabled = true;
-  btn.innerHTML = '<span>⏳</span> Loading ShopLite...';
+  btn.innerHTML = '<span>⏳</span> Loading...';
 
   try {
     const res = await fetch('/api/demo/seed', { method: 'POST' });
@@ -1281,7 +1514,7 @@ async function handleSeedDemo() {
     showToast(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<span>⚡</span> Load ShopLite Demo';
+    btn.innerHTML = '⚡ Load ShopLite';
   }
 }
 
@@ -1299,9 +1532,9 @@ async function handleUploadV2() {
     const data = await res.json();
 
     if (res.status === 200 && data.status === 'duplicate') {
-      showToast(`Duplicate: version ${data.versionId} already exists (Idempotent)`, 'info');
+      showToast(`Duplicate: version ${data.versionId} already uploaded (Idempotent)`, 'info');
     } else if (res.status === 201) {
-      showToast(`Uploaded ShopLite v2: new version ${data.versionId} created!`, 'success');
+      showToast(`Uploaded ShopLite v2: created version ${data.versionId}`, 'success');
       await loadVersions(projectId, data.versionId);
     } else {
       showToast(data.error || 'Upload error', 'error');
@@ -1325,7 +1558,7 @@ async function handleUploadInvalid() {
     const data = await res.json();
 
     if (res.status === 422) {
-      showToast(`Expected 422 Validation Error:\n${data.reasons.join('\n')}`, 'error');
+      showToast(`422 Rejected:\n${(data.reasons || []).join('\n')}`, 'error');
     } else {
       showToast(`Response: ${res.status}`, 'info');
     }
@@ -1337,7 +1570,7 @@ async function handleUploadInvalid() {
 async function uploadManifestFile(file) {
   const projectId = state.currentProject;
   if (!projectId) {
-    showToast('Please select or create a project first.', 'error');
+    showToast('Please select a project first.', 'error');
     return;
   }
 
@@ -1355,10 +1588,10 @@ async function uploadManifestFile(file) {
       if (res.status === 200 && data.status === 'duplicate') {
         showToast('Duplicate manifest: no new version created (Idempotent)', 'info');
       } else if (res.status === 201) {
-        showToast(`Manifest uploaded successfully! Version: ${data.versionId}`, 'success');
+        showToast(`Manifest uploaded! Version: ${data.versionId}`, 'success');
         await loadVersions(projectId, data.versionId);
       } else if (res.status === 422) {
-        showToast(`Validation rejected (422):\n${(data.reasons || []).join('\n')}`, 'error');
+        showToast(`422 Rejected:\n${(data.reasons || []).join('\n')}`, 'error');
       } else {
         showToast(data.error || 'Upload failed', 'error');
       }
@@ -1369,12 +1602,73 @@ async function uploadManifestFile(file) {
   reader.readAsText(file);
 }
 
-// ==================== Toast Notifications ====================
+async function handleScanSubmit() {
+  const path = document.getElementById('scanner-path').value.trim() || 'src/App.js';
+  const content = document.getElementById('scanner-content').value;
+  const btn = document.getElementById('btn-submit-scanner');
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+
+  try {
+    const scanRes = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: [{ path, content }] })
+    });
+    const scanData = await scanRes.json();
+    if (!scanRes.ok) throw new Error(scanData.error || 'Scan failed');
+
+    const targetProj = state.currentProject || 'Scanned Project';
+    const uploadRes = await fetch(`/api/projects/${encodeURIComponent(targetProj)}/manifest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scanData.manifest)
+    });
+    const uploadData = await uploadRes.json();
+
+    document.getElementById('modal-scanner').style.display = 'none';
+    showToast(`Scanned snippet: ${scanData.componentCount} components, ${scanData.edgeCount} edges`, 'success');
+    await loadProjects(targetProj);
+    if (uploadData.versionId) {
+      await loadVersions(targetProj, uploadData.versionId);
+    }
+  } catch (err) {
+    showToast('Scanner error: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Scan & Load Manifest';
+  }
+}
+
+async function handleCreateProjectSubmit() {
+  const input = document.getElementById('new-project-name');
+  const name = input.value.trim();
+  if (!name) return;
+
+  try {
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to create project');
+
+    document.getElementById('modal-new-project').style.display = 'none';
+    input.value = '';
+    showToast(`Project "${name}" created!`, 'success');
+    await loadProjects(name);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ==================== 10. Toasts ====================
 
 function showToast(msg, type = 'info') {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
+  toast.className = `toast-msg ${type}`;
 
   const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
   toast.innerHTML = `<span>${icon}</span><span>${msg.replace(/\n/g, '<br>')}</span>`;
@@ -1384,7 +1678,7 @@ function showToast(msg, type = 'info') {
   setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateX(100%)';
-    toast.style.transition = 'all 0.3s ease';
-    setTimeout(() => toast.remove(), 300);
+    toast.style.transition = 'all 0.25s ease';
+    setTimeout(() => toast.remove(), 250);
   }, 4000);
 }
