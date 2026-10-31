@@ -134,11 +134,11 @@ BugBound uses official MongoDB driver primitives across every layer:
    - Select Quick Scenario: `Rename user_name`.
    - Click **Run Impact Simulation**.
    - Watch the animated chain reaction reveal:
-     - Profile Page & Dashboard → 🔴 **BROKEN**
-     - Settings Page → 🟢 **SAFE**
-     - Analytics Page → 🟡 **UNCERTAIN** (highlights dynamic edge `data[key]`)
-     - Email Service → 🔴 **BROKEN** (writes deprecated field)
-     - Blast Radius: ~48 (MEDIUM IMPACT).
+     - Profile Page, Dashboard Page, `api.get_user`, `fn.formatName`, Email Service → 🔴 **BROKEN** (5 broken — static reads of `user_name`)
+     - Notification Service → 🟠 **AT_RISK** (depth 2, reaches field via email-service)
+     - Analytics Page → 🟡 **UNCERTAIN** (dynamic edge `data[key]`)
+     - Settings Page → 🟢 **SAFE** (reads `users.email`, not `user_name`)
+     - Blast Radius: **41 MEDIUM** (5 broken, 1 at-risk, 1 uncertain).
 3. **Run Identical Simulation Again:**
    - Click **Run Impact Simulation** again with the same parameters.
    - Response returns in ~2ms with `⚡ Cached Result (Idempotent)` badge.

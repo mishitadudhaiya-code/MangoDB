@@ -36,9 +36,11 @@
     { "from": "fn.formatName", "to": "db.users.user_name", "kind": "reads", "dynamic": false },
     { "from": "page.profile", "to": "api.get_user", "kind": "calls", "dynamic": false },
     { "from": "page.profile", "to": "fn.formatName", "kind": "calls", "dynamic": false },
+    { "from": "page.profile", "to": "db.users.user_name", "kind": "reads", "dynamic": false },
     { "from": "page.dashboard", "to": "api.get_user", "kind": "calls", "dynamic": false },
     { "from": "page.dashboard", "to": "api.get_order", "kind": "calls", "dynamic": false },
-    { "from": "page.settings", "to": "api.get_user", "kind": "calls", "dynamic": false },
+    { "from": "page.dashboard", "to": "db.users.user_name", "kind": "reads", "dynamic": false },
+    { "from": "page.settings", "to": "db.users.email", "kind": "reads", "dynamic": false },
     { "from": "page.orders", "to": "api.post_orders", "kind": "calls", "dynamic": false },
     { "from": "page.orders", "to": "api.get_order", "kind": "calls", "dynamic": false },
     { "from": "page.analytics", "to": "db.users.user_name", "kind": "reads", "dynamic": true, "meta": { "note": "Dynamic property access via variable key" } },
@@ -50,7 +52,6 @@
     { "from": "page.orders", "to": "svc.billing", "kind": "calls", "dynamic": false },
     { "from": "fn.calcTotal", "to": "db.orders.total", "kind": "reads", "dynamic": false },
     { "from": "api.post_orders", "to": "fn.calcTotal", "kind": "calls", "dynamic": false },
-    { "from": "svc.notification", "to": "svc.email", "kind": "calls", "dynamic": false },
-    { "from": "svc.notification", "to": "db.users.user_name", "kind": "reads", "dynamic": false }
+    { "from": "svc.notification", "to": "svc.email", "kind": "calls", "dynamic": false }
   ]
 }

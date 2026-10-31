@@ -74,45 +74,64 @@ describe('validateManifest', () => {
 describe('propagate — change types', () => {
   const graph = buildGraph(shoplite);
 
-  it('RENAME_FIELD: renaming user_name breaks Profile, Dashboard, email-service, formatName', () => {
+  it('RENAME_FIELD: ShopLite section 12 expectations', () => {
     const change = { type: 'RENAME_FIELD', targetId: 'db.users.user_name', params: { from: 'user_name', to: 'username' } };
     const affected = propagate(graph, change);
+    const { score, counts } = blastRadius(graph, change.targetId, affected);
 
-    // api.get_user reads user_name → BROKEN (depth 1, static)
+    // api.get_user reads user_name directly → BROKEN (depth 1)
     const apiGetUser = findAffected(affected, 'api.get_user');
     assert.ok(apiGetUser, 'api.get_user should be affected');
     assert.equal(apiGetUser.status, 'BROKEN');
     assert.equal(apiGetUser.depth, 1);
 
-    // fn.formatName reads user_name → BROKEN (depth 1, static)
+    // fn.formatName reads user_name directly → BROKEN (depth 1, static)
     const fnFormatName = findAffected(affected, 'fn.formatName');
     assert.ok(fnFormatName, 'fn.formatName should be affected');
     assert.equal(fnFormatName.status, 'BROKEN');
+    assert.equal(fnFormatName.depth, 1);
 
-    // svc.email reads user_name → BROKEN (depth 1, static)
+    // svc.email reads user_name directly → BROKEN (depth 1, static)
     const svcEmail = findAffected(affected, 'svc.email');
     assert.ok(svcEmail, 'svc.email should be affected');
     assert.equal(svcEmail.status, 'BROKEN');
+    assert.equal(svcEmail.depth, 1);
 
-    // page.profile calls api.get_user → AT_RISK (depth 2, static)
+    // page.profile reads user_name directly (static edge) → BROKEN (depth 1)
     const pageProfile = findAffected(affected, 'page.profile');
     assert.ok(pageProfile, 'page.profile should be affected');
-    assert.equal(pageProfile.status, 'AT_RISK');
+    assert.equal(pageProfile.status, 'BROKEN');
+    assert.equal(pageProfile.depth, 1);
 
-    // page.dashboard calls api.get_user → AT_RISK (depth 2, static)
+    // page.dashboard reads user_name directly (static edge) → BROKEN (depth 1)
     const pageDashboard = findAffected(affected, 'page.dashboard');
     assert.ok(pageDashboard, 'page.dashboard should be affected');
-    assert.equal(pageDashboard.status, 'AT_RISK');
+    assert.equal(pageDashboard.status, 'BROKEN');
+    assert.equal(pageDashboard.depth, 1);
 
-    // page.analytics has dynamic edge → UNCERTAIN
+    // page.analytics has dynamic edge to user_name → UNCERTAIN
     const pageAnalytics = findAffected(affected, 'page.analytics');
     assert.ok(pageAnalytics, 'page.analytics should be affected');
     assert.equal(pageAnalytics.status, 'UNCERTAIN');
 
-    // page.settings only calls api.get_user — but it should be AT_RISK at depth 2
+    // svc.notification reaches user_name only via svc.email (calls) → AT_RISK (depth 2)
+    const svcNotification = findAffected(affected, 'svc.notification');
+    assert.ok(svcNotification, 'svc.notification should be affected');
+    assert.equal(svcNotification.status, 'AT_RISK');
+    assert.equal(svcNotification.depth, 2);
+
+    // page.settings reads db.users.email (not user_name) → SAFE (not in affected)
     const pageSettings = findAffected(affected, 'page.settings');
-    // Settings calls get_user which reads user_name, so it IS reached at depth 2
-    assert.ok(pageSettings, 'page.settings should be affected at depth 2');
+    assert.ok(!pageSettings, 'page.settings should NOT be in affected (it is SAFE)');
+
+    // Verify counts: 5 broken, 1 at_risk, 1 uncertain, 14 safe
+    assert.equal(counts.broken, 5, `Expected 5 broken, got ${counts.broken}`);
+    assert.equal(counts.atRisk, 1, `Expected 1 at_risk, got ${counts.atRisk}`);
+    assert.equal(counts.uncertain, 1, `Expected 1 uncertain, got ${counts.uncertain}`);
+    assert.equal(counts.safe, 14, `Expected 14 safe, got ${counts.safe}`);
+
+    // Score must be between 0 and 100
+    assert.ok(score >= 0 && score <= 100, `Score ${score} out of range`);
   });
 
   it('DELETE_FIELD: deleting email field', () => {
@@ -393,16 +412,13 @@ describe('hash', () => {
 describe('ShopLite section 12 expectations', () => {
   const graph = buildGraph(shoplite);
 
-  it('renaming user_name: Profile BROKEN or AT_RISK, Dashboard BROKEN or AT_RISK, Analytics UNCERTAIN, email-service BROKEN', () => {
+  it('renaming user_name: Profile BROKEN, Dashboard BROKEN, Analytics UNCERTAIN, email-service BROKEN, notification AT_RISK depth 2, Settings SAFE', () => {
     const change = { type: 'RENAME_FIELD', targetId: 'db.users.user_name', params: { from: 'user_name', to: 'username' } };
     const affected = propagate(graph, change);
-    const { score, label, counts } = blastRadius(graph, change.targetId, affected);
+    const { score, counts } = blastRadius(graph, change.targetId, affected);
 
-    // At least 2 BROKEN
-    assert.ok(counts.broken >= 2, `Expected at least 2 broken, got ${counts.broken}`);
-
-    // At least 1 UNCERTAIN (analytics)
-    assert.ok(counts.uncertain >= 1, `Expected at least 1 uncertain, got ${counts.uncertain}`);
+    // Exactly 5 BROKEN (api.get_user, fn.formatName, svc.email, page.profile, page.dashboard)
+    assert.equal(counts.broken, 5, `Expected 5 broken, got ${counts.broken}`);
 
     // email-service BROKEN
     const email = findAffected(affected, 'svc.email');
@@ -414,31 +430,54 @@ describe('ShopLite section 12 expectations', () => {
     assert.ok(analytics);
     assert.equal(analytics.status, 'UNCERTAIN');
 
-    // At least one depth-2 AT_RISK
+    // Exactly 1 depth-2 AT_RISK: svc.notification
     const depthTwo = affected.filter(a => a.depth === 2 && a.status === 'AT_RISK');
     assert.ok(depthTwo.length >= 1, `Expected at least 1 depth-2 AT_RISK, got ${depthTwo.length}`);
+    const notif = findAffected(affected, 'svc.notification');
+    assert.ok(notif, 'svc.notification should be AT_RISK at depth 2');
+    assert.equal(notif.status, 'AT_RISK');
+    assert.equal(notif.depth, 2);
+
+    // page.settings is SAFE (not in affected list)
+    const settings = findAffected(affected, 'page.settings');
+    assert.ok(!settings, 'page.settings should be SAFE and absent from affected list');
+
+    // Score in bounds
+    assert.ok(score >= 0 && score <= 100, `Score ${score} out of range`);
   });
 
-  it('changing PAYMENT_TIMEOUT: billing-service AT_RISK, Orders page at depth 2', () => {
+  it('CHANGE_CONFIG on cfg.payment_timeout: svc.billing AT_RISK depth 1, page.orders AT_RISK depth 2', () => {
     const change = { type: 'CHANGE_CONFIG', targetId: 'cfg.payment_timeout', params: { key: 'PAYMENT_TIMEOUT', from: '30', to: '5' } };
     const affected = propagate(graph, change);
 
+    // svc.billing configures payment_timeout → AT_RISK (depth 1)
     const billing = findAffected(affected, 'svc.billing');
-    assert.ok(billing);
+    assert.ok(billing, 'svc.billing should be affected');
     assert.equal(billing.status, 'AT_RISK');
+    assert.equal(billing.depth, 1);
 
+    // page.orders calls svc.billing → AT_RISK (depth 2)
     const orders = findAffected(affected, 'page.orders');
     assert.ok(orders, 'page.orders should be affected at depth 2');
+    assert.equal(orders.status, 'AT_RISK');
     assert.equal(orders.depth, 2);
   });
 
-  it('upgrading payments-sdk: one edge with usesRemovedApi → BROKEN', () => {
+  it('UPGRADE_DEPENDENCY_MAJOR on pkg.payments_sdk: svc.billing BROKEN (usesRemovedApi), page.orders AT_RISK depth 2', () => {
     const change = { type: 'UPGRADE_DEPENDENCY_MAJOR', targetId: 'pkg.payments_sdk', params: { from: '1.x', to: '2.x' } };
     const affected = propagate(graph, change);
 
+    // svc.billing imports payments_sdk with usesRemovedApi: true → BROKEN
     const billing = findAffected(affected, 'svc.billing');
-    assert.ok(billing);
+    assert.ok(billing, 'svc.billing should be BROKEN due to usesRemovedApi');
     assert.equal(billing.status, 'BROKEN');
+    assert.equal(billing.depth, 1);
+
+    // page.orders calls svc.billing (BROKEN) → AT_RISK (depth 2)
+    const orders = findAffected(affected, 'page.orders');
+    assert.ok(orders, 'page.orders should be affected at depth 2');
+    assert.equal(orders.status, 'AT_RISK');
+    assert.equal(orders.depth, 2);
   });
 });
 
