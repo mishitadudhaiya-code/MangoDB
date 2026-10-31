@@ -41,6 +41,18 @@ const CRITICALITY_COLORS = {
   5: { bg: '#991b1b', border: '#ef4444' }  // Critical (Red)
 };
 
+// Cytoscape node shapes by component type
+const SHAPE_BY_TYPE = {
+  field:    'round-rectangle',
+  table:    'barrel',
+  api:      'diamond',
+  function: 'hexagon',
+  page:     'rectangle',
+  service:  'round-octagon',
+  config:   'round-tag',
+  package:  'round-pentagon'
+};
+
 // Compatible component types per change type
 const COMPATIBLE_TYPES = {
   RENAME_FIELD: ['field', 'api'],
@@ -172,6 +184,20 @@ function initCytoscape() {
           'transition-property': 'background-color, border-color, width, height, opacity, border-width',
           'transition-duration': '0.2s'
         }
+      },
+      // Per-type Shapes (colours set by base node + status rules; only shape here)
+      ...Object.entries(SHAPE_BY_TYPE).map(([type, shape]) => ({
+        selector: `node[type = "${type}"]`,
+        style: { shape }
+      })),
+      // Wider size for diamond / hexagon so label fits
+      {
+        selector: 'node[type = "api"]',
+        style: { width: 44, height: 44 }
+      },
+      {
+        selector: 'node[type = "function"]',
+        style: { width: 44, height: 44 }
       },
       // Selected Node
       {

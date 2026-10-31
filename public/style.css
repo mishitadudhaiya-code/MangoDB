@@ -1004,3 +1004,78 @@ html, body {
   .side-panel-left { left: 0; }
   .side-panel-right { right: 0; }
 }
+
+/* ── Compact Graph Legend (below Cytoscape canvas) ─────────────────────────── */
+.graph-legend {
+  position: absolute;
+  bottom: 44px;              /* above the bottom-chips row */
+  left: 0;
+  right: 0;
+  padding: 4px 10px 4px 12px;
+  background: rgba(8, 12, 20, 0.82);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.graph-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 0.62rem;
+  color: var(--text-secondary, #94a3b8);
+  line-height: 1;
+}
+
+.gl-label {
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.gl-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.gl-svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--text-muted, #64748b);
+  stroke: currentColor;
+}
+
+.gl-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.gl-edge-item {
+  gap: 4px;
+}
+
+@media (max-width: 600px) {
+  .graph-legend {
+    font-size: 0.58rem;
+    padding: 3px 6px;
+  }
+  .graph-legend-row {
+    gap: 4px 8px;
+  }
+}
