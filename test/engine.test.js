@@ -441,3 +441,107 @@ describe('ShopLite section 12 expectations', () => {
     assert.equal(billing.status, 'BROKEN');
   });
 });
+
+// ==================== Step 5: Engine Hardening ====================
+
+describe('Step 5: Engine Hardening', () => {
+  it('edge to a missing id does not crash buildGraph or propagate', () => {
+    const brokenGraph = buildGraph({
+      components: [
+        { id: 'a', type: 'api', name: 'A' },
+        { id: 'b', type: 'field', name: 'B' }
+      ],
+      edges: [
+        { from: 'a', to: 'b', kind: 'reads' },
+        { from: 'a', to: 'missing_id', kind: 'reads' },
+        { from: 'missing_id', to: 'b', kind: 'reads' }
+      ]
+    });
+
+    const affected = propagate(brokenGraph, { type: 'DELETE_FIELD', targetId: 'b', params: {} });
+    assert.equal(affected.length, 1);
+    assert.equal(affected[0].componentId, 'a');
+  });
+
+  it('change targeting a component with no dependents returns empty affected, score 0, label LOW', () => {
+    const graph = buildGraph({
+      components: [
+        { id: 'parent', type: 'page', name: 'Parent' },
+        { id: 'leaf', type: 'api', name: 'Leaf' }
+      ],
+      edges: [
+        { from: 'parent', to: 'leaf', kind: 'calls' }
+      ]
+    });
+
+    // Parent has no dependents (nothing depends on parent)
+    const affected = propagate(graph, { type: 'DELETE_ENDPOINT', targetId: 'parent', params: {} });
+    assert.equal(affected.length, 0);
+
+    const { score, label, counts } = blastRadius(graph, 'parent', affected);
+    assert.equal(score, 0);
+    assert.equal(label, 'LOW');
+    assert.equal(counts.broken, 0);
+    assert.equal(counts.safe, 1);
+  });
+
+  it('missing params are handled without crash', () => {
+    const graph = buildGraph({
+      components: [
+        { id: 'f', type: 'field', name: 'F' },
+        { id: 'p', type: 'page', name: 'P' }
+      ],
+      edges: [
+        { from: 'p', to: 'f', kind: 'reads' }
+      ]
+    });
+
+    // propagate with no params object
+    const affected = propagate(graph, { type: 'DELETE_FIELD', targetId: 'f' });
+    assert.equal(affected.length, 1);
+  });
+
+  it('handles a minimal graph of 2 nodes', () => {
+    const result = simulate({
+      components: [
+        { id: 'api1', type: 'api', name: 'API' },
+        { id: 'field1', type: 'field', name: 'Field' }
+      ],
+      edges: [
+        { from: 'api1', to: 'field1', kind: 'reads' }
+      ]
+    }, {
+      type: 'RENAME_FIELD',
+      targetId: 'field1',
+      params: { from: 'a', to: 'b' }
+    });
+
+    assert.equal(result.affected.length, 1);
+    assert.equal(result.affected[0].status, 'BROKEN');
+    assert.ok(result.score > 0);
+  });
+
+  it('cyclic graph with a dynamic edge propagates UNCERTAIN without hanging', () => {
+    const result = simulate({
+      components: [
+        { id: 'nodeA', type: 'service', name: 'A' },
+        { id: 'nodeB', type: 'service', name: 'B' },
+        { id: 'nodeC', type: 'service', name: 'C' }
+      ],
+      edges: [
+        { from: 'nodeB', to: 'nodeA', kind: 'calls', dynamic: true },
+        { from: 'nodeC', to: 'nodeB', kind: 'calls' },
+        { from: 'nodeA', to: 'nodeC', kind: 'calls' }
+      ]
+    }, {
+      type: 'CHANGE_CONFIG',
+      targetId: 'nodeA',
+      params: { key: 'K', from: '1', to: '2' }
+    });
+
+    assert.ok(result.affected.length >= 1);
+    for (const a of result.affected) {
+      assert.equal(a.status, 'UNCERTAIN');
+    }
+  });
+});

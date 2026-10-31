@@ -60,7 +60,7 @@ function blastRadius(graph, targetId, affected) {
   }
 
   // Safe = all components minus target minus affected
-  const safe = nodes.size - 1 - affected.length;
+  const safe = Math.max(0, nodes.size - 1 - affected.length);
 
   // Calculate raw score
   let raw = 0;
