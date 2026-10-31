@@ -4,7 +4,7 @@
 
 **Pitch:** BugBound builds a dependency graph of your application and simulates what a proposed change would break — showing the cascading chain reaction, the blast radius score, and the components that need manual review, before you deploy.
 
-- **Live Deployment:** [https://bugbound.onrender.com](https://bugbound.onrender.com) *(Demo deployment on Render)*
+- **Live Deployment:** [https://mangodb-90n3.onrender.com/](https://mangodb-90n3.onrender.com/)
 - **Demo Video:** [Watch 7-minute Walkthrough](https://youtu.be/placeholder-bugbound-demo) *(YouTube link placeholder)*
 - **Hackathon Track:** UNCHARTED 2026 (NEXUS × SVNIT Surat) — Track 3: *Developer Tools for Production Use Cases*
 
