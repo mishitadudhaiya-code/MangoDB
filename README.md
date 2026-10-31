@@ -5,7 +5,7 @@
 **Pitch:** BugBound builds a dependency graph of your application and simulates what a proposed change would break — showing the cascading chain reaction, the blast radius score, and the components that need manual review, before you deploy.
 
 - **Live Deployment:** [https://mangodb-90n3.onrender.com/](https://mangodb-90n3.onrender.com/)
-- **Demo Video:** [Watch 7-minute Walkthrough](https://youtu.be/placeholder-bugbound-demo) *(YouTube link placeholder)*
+- **Demo Video:** <!-- TODO: Add demo video link before submission (max 7 min walkthrough) --> [Watch 7-minute Walkthrough](TODO_DEMO_VIDEO_URL) *(TODO: Insert YouTube link before final submission)*
 - **Hackathon Track:** UNCHARTED 2026 (NEXUS × SVNIT Surat) — Track 3: *Developer Tools for Production Use Cases*
 
 ---
@@ -184,8 +184,8 @@ BugBound uses official MongoDB driver primitives across every layer:
 ### Installation
 ```bash
 # 1. Clone repository
-git clone https://github.com/your-username/bugbound.git
-cd bugbound
+git clone https://github.com/mishitadudhaiya-code/MangoDB.git
+cd MangoDB
 
 # 2. Install dependencies (zero dev dependencies needed!)
 npm install
@@ -197,7 +197,7 @@ cp .env.example .env
 # 4. Verify database connection and indexes
 npm run db:check
 
-# 5. Run automated test suite (52 tests)
+# 5. Run automated test suite (61 tests)
 npm test
 
 # 6. Start the server
@@ -209,10 +209,17 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## 8. Limitations & Honest Engineering (Important)
 
-- **Static Estimate, Not Runtime Guarantees:** BugBound models architectural contracts. It does not execute your code or observe production memory.
+- **Static Potential Impact Estimates:** All simulation outputs are potential impact estimates based on a static dependency model, not execution guarantees or certainty. BugBound models architectural contracts and does not execute your code or observe production memory.
 - **Dynamic Access is UNCERTAIN:** Dynamic property access (`obj[variableKey]`) cannot be resolved statically. Rather than guessing, BugBound explicitly labels it `UNCERTAIN` for engineer review.
-- **Manifest-Based Input:** Input is a project dependency manifest (JSON).
+- **Manifest-Based Input:** Input is a project dependency manifest (JSON) or lightweight regex snippet scanner, not a full compiler.
 - **Depth Cutoff:** Propagation stops at depth 5 to bound computational complexity on cyclic graphs.
+- **Out of Scope (By Design):**
+  - Full-language parsing and whole-repository AST analysis (beyond lightweight regex scanner for common JS/Python patterns)
+  - Runtime tracing and production memory observation
+  - Static type inference engine
+  - Authentication, multi-tenancy, and multi-user access control
+  - Direct GitHub / VCS webhook integration
+  - LLM-based hallucinated code fixes
 
 ---
 
@@ -232,5 +239,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 - **Hackathon:** UNCHARTED 2026 (NEXUS × SVNIT Surat)
 - **Track 3:** Developer Tools for Production Use Cases
-- **Team Name:** BugBound Engineers
-- **Lead / Backend / Engine:** AI & Student Pair-Programming Team
+- **Team Name:** [TODO: Insert Team Name]
+- **Members:**
+  - [TODO: Member 1 - Name & Role]
+  - [TODO: Member 2 - Name & Role]
+  - [TODO: Member 3 - Name & Role]

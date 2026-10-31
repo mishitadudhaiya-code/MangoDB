@@ -347,7 +347,8 @@ function showNodeFlyout(nodeData) {
                        nodeData.simulationStatus === 'AT_RISK' ? '#f97316' :
                        nodeData.simulationStatus === 'UNCERTAIN' ? '#eab308' : '#10b981';
 
-    document.getElementById('flyout-reason').textContent = nodeData.simulationReason || 'Affected downstream.';
+    const reasonFormatted = formatReason({ status: nodeData.simulationStatus, reason: nodeData.simulationReason });
+    document.getElementById('flyout-reason').textContent = reasonFormatted || 'Affected downstream.';
     document.getElementById('flyout-recommendation').textContent = `Action: ${nodeData.simulationRecommendation || 'Review component contract.'}`;
   } else {
     statusBlock.style.display = 'none';
@@ -363,7 +364,8 @@ function populateAccordionDetails(nodeData) {
   // 1. Reason & Recommendation
   document.getElementById('reasons-node-name').textContent = nodeData.name || nodeData.id;
   if (nodeData.simulationStatus) {
-    document.getElementById('reasons-node-text').textContent = `${nodeData.simulationStatus}: ${nodeData.simulationReason || ''}`;
+    const reasonFormatted = formatReason({ status: nodeData.simulationStatus, reason: nodeData.simulationReason });
+    document.getElementById('reasons-node-text').textContent = `${nodeData.simulationStatus}: ${reasonFormatted || ''}`;
     document.getElementById('reasons-node-rec').textContent = `💡 Recommendation: ${nodeData.simulationRecommendation || 'Verify usage.'}`;
   } else {
     document.getElementById('reasons-node-text').textContent = 'This component is safe or not currently affected by the simulation.';
@@ -926,7 +928,7 @@ function animateChainReaction(targetId, affected, chains) {
         node.data({
           simulationStatus: a.status,
           simulationDepth: a.depth,
-          simulationReason: a.reason,
+          simulationReason: formatReason(a),
           simulationRecommendation: a.recommendation
         });
 
@@ -1057,17 +1059,36 @@ function renderReport(sim) {
   }
 }
 
+function formatReason(item) {
+  let reason = (item.reason || 'Impacted via dependency propagation').trim();
+  const isPotential = item.status === 'AT_RISK' || item.status === 'UNCERTAIN';
+  const startsWithPotentially = /^potentially\b/i.test(reason);
+
+  if (isPotential) {
+    if (!startsWithPotentially) {
+      reason = 'Potentially ' + reason.charAt(0).toLowerCase() + reason.slice(1);
+    }
+  } else {
+    if (startsWithPotentially) {
+      reason = reason.replace(/^potentially\s+/i, '');
+      reason = reason.charAt(0).toUpperCase() + reason.slice(1);
+    }
+  }
+  return reason;
+}
+
 function createAffectedRow(item) {
   const row = document.createElement('div');
   row.className = `affected-row-card ${item.status}`;
   const badgeClass = item.status === 'BROKEN' ? 'badge-broken' : item.status === 'AT_RISK' ? 'badge-at_risk' : 'badge-uncertain';
+  const reasonText = formatReason(item);
 
   row.innerHTML = `
     <div class="affected-row-header">
       <span class="affected-row-name">${item.name || item.componentId}</span>
       <span class="status-badge ${badgeClass}">${item.status} (d:${item.depth})</span>
     </div>
-    <div class="affected-row-sub">${item.reason || 'Impacted via dependency propagation'}</div>
+    <div class="affected-row-sub">${reasonText}</div>
     <div style="font-size:0.65rem;color:var(--accent-green);margin-top:0.15rem;">💡 ${item.recommendation || 'Verify behavior'}</div>
   `;
 
