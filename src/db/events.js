@@ -16,24 +16,22 @@ const crypto = require('crypto');
  * @param {string} [opts.eventId] - Optional deterministic eventId; generated if not provided
  * @returns {Object} The inserted event document (or null if duplicate)
  */
-async function logEvent({ projectId, type, status, details = {}, eventId }) {
-  const db = getDb();
-
-  // Generate eventId if not provided
-  if (!eventId) {
-    eventId = `${projectId}:${type}:${crypto.randomUUID()}`;
-  }
-
-  const doc = {
-    eventId,
-    projectId,
-    type,
-    at: new Date(),
-    status,
-    details
-  };
-
   try {
+    const db = getDb();
+    // Generate eventId if not provided
+    if (!eventId) {
+      eventId = `${projectId}:${type}:${crypto.randomUUID()}`;
+    }
+
+    const doc = {
+      eventId,
+      projectId,
+      type,
+      at: new Date(),
+      status,
+      details
+    };
+
     await db.collection('events').insertOne(doc);
     return doc;
   } catch (err) {
@@ -42,8 +40,9 @@ async function logEvent({ projectId, type, status, details = {}, eventId }) {
       console.log(`Event already logged: ${eventId}`);
       return null;
     }
-    throw err;
+    // If DB is not connected, log warning instead of crashing
+    console.warn(`[events] Could not log event ${type}:`, err.message);
+    return null;
   }
-}
 
 module.exports = { logEvent };

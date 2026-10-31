@@ -6,6 +6,7 @@ const compression = require('compression');
 const path = require('path');
 const { connect } = require('./db/index');
 const { setup } = require('./db/setup');
+const projectsRouter = require('./routes/projects');
 
 const app = express();
 
@@ -16,6 +17,9 @@ app.use(express.json({ limit: '5mb' }));
 
 // Serve static files from /public
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Routes
+app.use(projectsRouter);
 
 // Health check — also pings MongoDB
 app.get('/api/health', async (req, res) => {
