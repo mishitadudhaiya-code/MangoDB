@@ -2,6 +2,7 @@
  * src/db/index.js — MongoDB connection manager
  * Uses the official mongodb driver. Caches the client across requests.
  */
+require('dns').setServers(['8.8.8.8', '1.1.1.1']);
 const { MongoClient } = require('mongodb');
 
 let client = null;
