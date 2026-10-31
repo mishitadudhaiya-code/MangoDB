@@ -1,0 +1,24 @@
+{
+  "name": "bugbound",
+  "version": "1.0.0",
+  "description": "BugBound – Change-impact analysis tool. One tiny code change. How much of your application does it break?",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/**/*.test.js",
+    "db:check": "node src/db/check.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": ["dependency-graph", "impact-analysis", "mongodb", "change-impact"],
+  "license": "MIT",
+  "dependencies": {
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "mongodb": "^6.8.0"
+  }
+}

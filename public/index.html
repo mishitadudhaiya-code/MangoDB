@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="BugBound – Change-impact analysis tool that builds a dependency graph and simulates what a proposed change would break.">
+  <title>BugBound – Change Impact Analysis</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .container { text-align: center; max-width: 600px; padding: 2rem; }
+    h1 { font-size: 2.5rem; margin-bottom: 0.5rem; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .tagline { font-size: 1.1rem; color: #94a3b8; margin-bottom: 2rem; }
+    .health-box { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 1.5rem; margin-top: 1rem; }
+    .health-box h2 { font-size: 1rem; color: #64748b; margin-bottom: 0.5rem; }
+    #health-result { font-family: monospace; color: #22c55e; }
+    .note { font-size: 0.8rem; color: #64748b; margin-top: 1.5rem; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>BugBound</h1>
+    <p class="tagline">One tiny code change. How much of your application does it break?</p>
+    <p class="note">Estimates based on a static dependency model, not guarantees.</p>
+    <div class="health-box">
+      <h2>API Health</h2>
+      <pre id="health-result">Checking...</pre>
+    </div>
+  </div>
+  <script>
+    fetch('/api/health')
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('health-result').textContent = JSON.stringify(data, null, 2);
+      })
+      .catch(err => {
+        document.getElementById('health-result').textContent = 'Error: ' + err.message;
+        document.getElementById('health-result').style.color = '#ef4444';
+      });
+  </script>
+</body>
+</html>
