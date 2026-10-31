@@ -1455,6 +1455,32 @@ function downloadReportJSON() {
   URL.revokeObjectURL(url);
 }
 
+function pickTarget(targetSel, preferredId, fallbackName) {
+  if (!targetSel) {
+    showToast('Load the ShopLite demo first', 'error');
+    return false;
+  }
+  const options = Array.from(targetSel.options || []);
+  const hasPreferred = options.some(opt => opt.value === preferredId);
+  if (hasPreferred) {
+    targetSel.value = preferredId;
+    return true;
+  }
+  const fallback = (fallbackName || '').toLowerCase();
+  if (fallback) {
+    const matched = options.find(opt => {
+      const text = (opt.text || opt.textContent || '').toLowerCase();
+      return text.includes(fallback) || text.includes(fallback.replace(/_/g, '-'));
+    });
+    if (matched && matched.value) {
+      targetSel.value = matched.value;
+      return true;
+    }
+  }
+  showToast('Load the ShopLite demo first', 'error');
+  return false;
+}
+
 function applyPreset(preset) {
   const typeSel = document.getElementById('change-type-select');
   const targetSel = document.getElementById('target-component-select');
@@ -1463,37 +1489,42 @@ function applyPreset(preset) {
     typeSel.value = 'RENAME_FIELD';
     renderParamFields('RENAME_FIELD');
     if (state.graphData) updateTargetOptions(state.graphData.components);
-    targetSel.value = 'db.users.user_name';
+    if (!pickTarget(targetSel, 'db.users.user_name', 'user_name')) return false;
     const from = document.getElementById('param-from');
     const to = document.getElementById('param-to');
     if (from) from.value = 'user_name';
     if (to) to.value = 'username';
+    return true;
   } else if (preset === 'delete-email') {
     typeSel.value = 'DELETE_FIELD';
     renderParamFields('DELETE_FIELD');
     if (state.graphData) updateTargetOptions(state.graphData.components);
-    targetSel.value = 'db.users.email';
+    if (!pickTarget(targetSel, 'db.users.email', 'email')) return false;
+    return true;
   } else if (preset === 'change-timeout') {
     typeSel.value = 'CHANGE_CONFIG';
     renderParamFields('CHANGE_CONFIG');
     if (state.graphData) updateTargetOptions(state.graphData.components);
-    targetSel.value = 'config.PAYMENT_TIMEOUT';
+    if (!pickTarget(targetSel, 'cfg.payment_timeout', 'payment_timeout')) return false;
     const key = document.getElementById('param-key');
     const from = document.getElementById('param-from');
     const to = document.getElementById('param-to');
     if (key) key.value = 'PAYMENT_TIMEOUT';
     if (from) from.value = '30';
     if (to) to.value = '5';
+    return true;
   } else if (preset === 'upgrade-payments') {
     typeSel.value = 'UPGRADE_DEPENDENCY_MAJOR';
     renderParamFields('UPGRADE_DEPENDENCY_MAJOR');
     if (state.graphData) updateTargetOptions(state.graphData.components);
-    targetSel.value = 'pkg.payments_sdk';
+    if (!pickTarget(targetSel, 'pkg.payments_sdk', 'payments')) return false;
     const from = document.getElementById('param-from');
     const to = document.getElementById('param-to');
     if (from) from.value = '1.x';
     if (to) to.value = '2.x';
+    return true;
   }
+  return false;
 }
 
 // ==================== 9. Handlers for Demo & File Uploads ====================
