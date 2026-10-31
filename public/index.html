@@ -3,545 +3,226 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BugBound — Change-Impact Analysis for Production Systems</title>
-  <meta name="description" content="BugBound builds a dependency graph of your application and simulates what proposed changes break before you deploy.">
+  <title>BugBound — Change-Impact Analysis & Blast Radius Engine</title>
+  <meta name="description" content="BugBound builds a static dependency graph of your application and calculates the ripple effect of schema and code changes before you deploy.">
 
-  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <!-- Google Fonts: Inter, JetBrains Mono, and Caveat (Handwritten) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <!-- Cytoscape.js & Chart.js from CDN -->
+  <!-- Cytoscape.js & Chart.js from cdnjs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 
-  <!-- Stylesheet -->
+  <!-- Unified Application Stylesheet -->
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="app-body">
 
-  <!-- ==================== 1. TOP BAR ==================== -->
-  <header class="top-bar">
-    <div class="top-bar-left">
-      <div class="brand-wrapper" id="brand-home-link" title="BugBound — Change-Impact Analysis">
-        <div class="brand-glyph">⚡</div>
-        <span class="brand-name">BugBound</span>
-      </div>
-      <span class="brand-tagline-text">One tiny code change. How much of your application does it break?</span>
-    </div>
+  <!-- ==================== APP SHELL WRAPPER ==================== -->
+  <div class="app-layout">
 
-    <div class="top-bar-right">
-      <!-- Project Selector & New -->
-      <div class="top-control-group">
-        <select id="project-select" class="select-compact" title="Active Project">
-          <option value="">Select project...</option>
-        </select>
-        <button id="btn-new-project" class="btn btn-ghost" title="Create New Project">+ New</button>
+    <!-- ==================== 1. FIXED LEFT SIDEBAR (~220px) ==================== -->
+    <aside class="app-sidebar" id="app-sidebar">
+      <!-- Brand Logo & Tagline -->
+      <div class="sidebar-brand">
+        <a href="#/dashboard" class="brand-link">
+          <div class="brand-glyph">⚡</div>
+          <div class="brand-titles">
+            <span class="brand-name">BugBound</span>
+            <span class="brand-tagline">Change-Impact Intelligence</span>
+          </div>
+        </a>
       </div>
 
-      <!-- Version Selector -->
-      <div class="top-control-group">
-        <select id="version-select" class="select-compact" title="Graph Version">
-          <option value="">Select version...</option>
-        </select>
-      </div>
+      <!-- Navigation Links with SVG Icons -->
+      <nav class="sidebar-nav">
+        <!-- 1. Dashboard -->
+        <a href="#/dashboard" class="nav-item active" title="System Dashboard & Health">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+          <span class="nav-label">Dashboard</span>
+        </a>
 
-      <!-- Action Buttons -->
-      <button id="btn-seed-demo" class="btn btn-glowing-green" title="One-click load ShopLite Demo">
-        ⚡ Load ShopLite
-      </button>
-      <button id="btn-open-scanner" class="btn btn-outline-cyan" title="Heuristic source code regex scanner">
-        🔍 Scan Code
-      </button>
-      <button id="btn-reset-view" class="btn btn-ghost" title="Reset view and selections">
-        ↺ Reset
-      </button>
-      <button id="btn-download-report" class="btn btn-ghost" title="Download simulation report as JSON">
-        📥 Report
-      </button>
+        <!-- 2. Graph Explorer -->
+        <a href="#/graph" class="nav-item" title="Cytoscape Topology Visualizer">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="18" cy="5" r="3"></circle>
+            <circle cx="6" cy="12" r="3"></circle>
+            <circle cx="18" cy="19" r="3"></circle>
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+          </svg>
+          <span class="nav-label">Graph Explorer</span>
+        </a>
 
-      <!-- Live indicators -->
-      <div id="db-status-pill" class="top-status-indicator" title="MongoDB Connection">
-        <span class="indicator-dot yellow"></span>
-        <span id="db-status-text">Atlas</span>
-      </div>
-      <div id="stream-status-pill" class="top-status-indicator" title="SSE Live Stream">
-        <span class="indicator-dot green"></span>
-        <span id="stream-status-text">Live</span>
-      </div>
-    </div>
-  </header>
+        <!-- 3. What-If Simulator -->
+        <a href="#/simulate" class="nav-item" title="Propose Schema & Code Changes">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          <span class="nav-label">What-If Simulator</span>
+        </a>
 
-  <!-- ==================== 2. MAIN VIEWPORT ==================== -->
-  <main class="main-viewport">
+        <!-- 4. Chain Reaction -->
+        <a href="#/chain" class="nav-item" title="Cascading Propagation Flow">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+          </svg>
+          <span class="nav-label">Chain Reaction</span>
+        </a>
 
-    <!-- ==================== LEFT SIDEBAR (~280px) ==================== -->
-    <aside class="side-panel side-panel-left">
-      <div class="panel-scroll-content">
+        <!-- 5. Blast Radius -->
+        <a href="#/blast" class="nav-item" title="Whiteboard Hand-Drawn Sketch">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <circle cx="12" cy="12" r="6"></circle>
+            <circle cx="12" cy="12" r="2"></circle>
+          </svg>
+          <span class="nav-label">Blast Radius</span>
+        </a>
 
-        <!-- Blast-Radius Score Ring -->
-        <div class="panel-card" style="text-align: center;">
-          <div class="panel-card-title">
-            <span>Blast Radius Score</span>
-            <span id="cached-pill-left" style="display: none; color: var(--accent-cyan); font-size: 0.65rem;">⚡ Cached</span>
-          </div>
+        <!-- 6. History & Compare -->
+        <a href="#/history" class="nav-item" title="Audit Runs & Side-by-Side Diff">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+          <span class="nav-label">History & Compare</span>
+        </a>
 
-          <div class="score-ring-container">
-            <div style="position: relative; display: flex; align-items: center; justify-content: center;">
-              <svg class="score-ring-svg" viewBox="0 0 100 100">
-                <circle class="score-ring-bg" cx="50" cy="50" r="45"></circle>
-                <circle id="score-ring-progress" class="score-ring-fill" cx="50" cy="50" r="45"></circle>
-              </svg>
-              <div class="score-ring-inner">
-                <span id="ring-score-val" class="score-number" style="color: var(--accent-green);">--</span>
-                <span id="ring-score-lbl" class="score-status-badge" style="color: var(--text-muted);">No Sim Yet</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <!-- 7. Analytics -->
+        <a href="#/analytics" class="nav-item" title="Risk Analytics & Hotspots">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="20" x2="18" y2="10"></line>
+            <line x1="12" y1="20" x2="12" y2="4"></line>
+            <line x1="6" y1="20" x2="6" y2="14"></line>
+          </svg>
+          <span class="nav-label">Analytics</span>
+        </a>
 
-        <!-- 2x2 Stat Cards -->
-        <div class="stat-grid-2x2">
-          <div class="stat-cell">
-            <span id="stat-components" class="stat-cell-value">0</span>
-            <span class="stat-cell-label">Components</span>
-          </div>
-          <div class="stat-cell">
-            <span id="stat-edges" class="stat-cell-value">0</span>
-            <span class="stat-cell-label">Edges</span>
-          </div>
-          <div class="stat-cell">
-            <span id="stat-simulations" class="stat-cell-value">0</span>
-            <span class="stat-cell-label">Simulations</span>
-          </div>
-          <div class="stat-cell">
-            <span id="stat-uncertain" class="stat-cell-value" style="color: var(--status-uncertain);">0</span>
-            <span class="stat-cell-label">Uncertain</span>
-          </div>
-        </div>
+        <!-- 8. Live Events -->
+        <a href="#/events" class="nav-item" title="Real-Time Audit SSE Feed">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"></path>
+            <path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"></path>
+            <circle cx="12" cy="12" r="2"></circle>
+            <path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"></path>
+            <path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"></path>
+          </svg>
+          <span class="nav-label">Live Events</span>
+        </a>
 
-        <!-- Color-By Selector -->
-        <div class="panel-card">
-          <div class="color-by-row">
-            <span class="panel-card-title" style="margin-bottom: 0;">Color Nodes By</span>
-            <select id="color-by-select" class="select-compact" style="max-width: 130px; font-size: 0.75rem;">
-              <option value="type">Type (Palette)</option>
-              <option value="status">Simulation Status</option>
-              <option value="criticality">Criticality (1-5)</option>
-            </select>
-          </div>
-        </div>
+        <!-- 9. Code Scanner -->
+        <a href="#/scanner" class="nav-item" title="Heuristic AST/Regex Pattern Scanner">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <span class="nav-label">Code Scanner</span>
+        </a>
 
-        <!-- Legend for Types and Statuses -->
-        <div class="panel-card">
-          <div class="panel-card-title">Legend</div>
-          <div class="legend-grid">
-            <div class="legend-badge"><span class="legend-swatch" style="background: #3b82f6;"></span> Target</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #ef4444;"></span> Broken</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #f97316;"></span> At Risk</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #eab308; border: 1px dashed #facc15;"></span> Uncertain</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #10b981;"></span> Safe</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #f59e0b;"></span> Field</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #a855f7;"></span> API</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #06b6d4;"></span> Function</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #38bdf8;"></span> Page</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #ec4899;"></span> Service</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #e2e8f0;"></span> Config</div>
-            <div class="legend-badge"><span class="legend-swatch" style="background: #f43f5e;"></span> Package</div>
-          </div>
-        </div>
-
-        <!-- Component Explorer -->
-        <div class="panel-card" style="flex: 1; display: flex; flex-direction: column;">
-          <div class="panel-card-title">
-            <span>Component Explorer</span>
-            <button id="btn-clear-filter" class="btn btn-ghost" style="padding: 0.15rem 0.4rem; font-size: 0.65rem;">Clear</button>
-          </div>
-          <div class="explorer-search-row">
-            <input type="text" id="explorer-search" class="input-search" placeholder="Search by name / id...">
-          </div>
-          <div id="explorer-tree" class="explorer-tree">
-            <!-- Dynamically populated component tree grouped by type -->
-            <div style="color: var(--text-muted); font-size: 0.72rem; text-align: center; padding: 1rem;">
-              Load a graph version to explore components
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </aside>
-
-    <!-- ==================== 3. CENTER GRAPH CANVAS ==================== -->
-    <section class="center-viewport">
-
-      <!-- Floating Toolbar -->
-      <div class="floating-toolbar">
-        <!-- Layout Switcher Tabs -->
-        <div class="layout-pill-group">
-          <button class="layout-pill-btn active" data-layout="cose">Force</button>
-          <button class="layout-pill-btn" data-layout="breadthfirst">Layered</button>
-          <button class="layout-pill-btn" data-layout="concentric">Concentric</button>
-        </div>
-
-        <div class="toolbar-separator"></div>
-
-        <!-- Graph View Controls -->
-        <button id="btn-zoom-in" class="toolbar-icon-btn" title="Zoom In">+</button>
-        <button id="btn-zoom-out" class="toolbar-icon-btn" title="Zoom Out">−</button>
-        <button id="btn-fit-graph" class="toolbar-icon-btn" title="Fit to Screen">⛶ Fit</button>
-        <button id="btn-reset-layout" class="toolbar-icon-btn" title="Reset Layout">↺ Run</button>
-      </div>
-
-      <!-- Cytoscape Canvas -->
-      <div id="cy"></div>
-
-      <!-- Bottom Left Chips -->
-      <div class="bottom-chips">
-        <span id="chip-components-count" class="chip">0 components</span>
-        <span id="chip-edges-count" class="chip">0 edges</span>
-        <span id="chip-affected-count" class="chip chip-affected">0 affected</span>
-      </div>
-
-      <!-- Animation HUD Banner -->
-      <div id="animation-banner" class="anim-hud-banner">
-        <span class="indicator-dot green"></span>
-        <span>Chain Reaction:</span>
-        <span id="anim-stage-text" style="font-family: var(--font-mono); color: var(--accent-green);">Propagating...</span>
-      </div>
-
-      <!-- Floating Node Detail HUD -->
-      <div id="node-flyout" class="node-flyout-hud">
-        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.4rem;">
-          <h4 id="flyout-title" style="font-size: 0.85rem; font-weight: 700;">Component</h4>
-          <button id="btn-close-flyout" class="close-x-btn" style="font-size: 0.95rem; line-height: 1;">×</button>
-        </div>
-        <div id="flyout-type" style="font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 0.35rem;"></div>
-        <div id="flyout-criticality" style="font-size: 0.72rem; color: var(--accent-cyan); margin-bottom: 0.45rem;"></div>
-
-        <div id="flyout-status-block" style="display: none; border-top: 1px solid var(--border-subtle); padding-top: 0.45rem; margin-top: 0.45rem;">
-          <div id="flyout-status" style="font-weight: 700; font-size: 0.78rem; font-family: var(--font-mono); margin-bottom: 0.25rem;"></div>
-          <div id="flyout-reason" style="font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 0.25rem;"></div>
-          <div id="flyout-recommendation" style="font-size: 0.72rem; color: var(--accent-green);"></div>
-        </div>
-      </div>
-
-    </section>
-
-    <!-- ==================== 4. RIGHT PANEL WITH TABS (~340px) ==================== -->
-    <aside class="side-panel side-panel-right">
-
-      <!-- Tab Headers: What-if | Impact | History -->
-      <nav class="tab-headers">
-        <button class="tab-nav-btn active" data-tab="tab-whatif">What-if</button>
-        <button class="tab-nav-btn" data-tab="tab-impact">Impact</button>
-        <button class="tab-nav-btn" data-tab="tab-history">History</button>
+        <!-- 10. How It Works -->
+        <a href="#/about" class="nav-item" title="Architecture & Judge Guide">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          <span class="nav-label">How It Works</span>
+        </a>
       </nav>
 
-      <!-- TAB 1: WHAT-IF -->
-      <div id="tab-whatif" class="tab-pane active">
-
-        <div class="panel-card">
-          <div class="panel-card-title">Quick Demo Scenarios</div>
-          <div class="scenario-chips-row">
-            <button class="scenario-chip" data-preset="rename-username">Rename user_name</button>
-            <button class="scenario-chip" data-preset="delete-email">Delete email</button>
-            <button class="scenario-chip" data-preset="change-timeout">Change PAYMENT_TIMEOUT</button>
-            <button class="scenario-chip" data-preset="upgrade-payments">Upgrade payments-sdk</button>
-          </div>
-
-          <div class="panel-card-title">Propose a Change</div>
-
-          <!-- Change Type -->
-          <div class="form-field">
-            <label class="form-label">Change Type</label>
-            <select id="change-type-select" class="form-select">
-              <option value="RENAME_FIELD">RENAME_FIELD (field / api)</option>
-              <option value="DELETE_FIELD">DELETE_FIELD (field)</option>
-              <option value="CHANGE_FIELD_TYPE">CHANGE_FIELD_TYPE (field)</option>
-              <option value="DELETE_ENDPOINT">DELETE_ENDPOINT (api)</option>
-              <option value="CHANGE_FUNCTION_SIGNATURE">CHANGE_FUNCTION_SIGNATURE (function)</option>
-              <option value="CHANGE_CONFIG">CHANGE_CONFIG (config)</option>
-              <option value="UPGRADE_DEPENDENCY_MAJOR">UPGRADE_DEPENDENCY_MAJOR (package)</option>
-            </select>
-          </div>
-
-          <!-- Target Component -->
-          <div class="form-field">
-            <label class="form-label">Target Component</label>
-            <select id="target-component-select" class="form-select">
-              <option value="">Load a graph version first...</option>
-            </select>
-          </div>
-
-          <!-- Dynamic Parameters -->
-          <div id="params-container">
-            <!-- Populated dynamically -->
-          </div>
-
-          <!-- Simulate Button -->
-          <button id="btn-simulate" class="btn btn-glowing-green" style="width: 100%; margin-top: 0.6rem; padding: 0.55rem;">
-            <span>🚀</span> Simulate Change Impact
-          </button>
-        </div>
-
-        <!-- Graph Versions & Demo Actions -->
-        <div class="panel-card">
-          <div class="panel-card-title">Sample Manifests & Actions</div>
-          <div style="display: flex; flex-direction: column; gap: 0.4rem;">
-            <button id="btn-upload-v2" class="btn btn-ghost" style="width: 100%; justify-content: flex-start;">
-              <span>📦</span> Upload ShopLite v2 (Version Diff)
-            </button>
-            <button id="btn-upload-invalid" class="btn btn-ghost" style="width: 100%; justify-content: flex-start;">
-              <span>💥</span> Try Broken Manifest (422)
-            </button>
-          </div>
-
-          <div style="margin-top: 0.75rem;">
-            <label class="form-label">Upload Custom Manifest</label>
-            <div id="drop-zone" style="border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 0.65rem; text-align: center; cursor: pointer; background: rgba(255,255,255,0.02); margin-top: 0.25rem;">
-              <input type="file" id="manifest-file-input" accept=".json" style="display: none;">
-              <div style="font-size: 0.72rem; color: var(--text-secondary);">Click or drop JSON manifest</div>
-            </div>
-          </div>
-        </div>
-
+      <!-- Sidebar Footer -->
+      <div class="sidebar-footer">
+        <span class="footer-version-text text-mono">BugBound v1.0 • MongoDB</span>
       </div>
-
-      <!-- TAB 2: IMPACT REPORT -->
-      <div id="tab-impact" class="tab-pane">
-
-        <!-- Disclaimer Banner -->
-        <div style="font-size: 0.68rem; color: #fde047; background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.25); border-radius: var(--radius-sm); padding: 0.35rem 0.55rem;">
-          ⚠️ Estimates from a static dependency model, not guarantees.
-        </div>
-
-        <!-- Impact Summary Header -->
-        <div class="panel-card">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
-            <span id="impact-change-header" style="font-weight: 700; font-size: 0.8rem; font-family: var(--font-mono); color: var(--text-primary);">
-              No Simulation Run
-            </span>
-            <span id="cached-badge" style="display: none; font-size: 0.62rem; color: var(--accent-cyan); background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 3px; padding: 0.1rem 0.35rem;">
-              ⚡ Cached
-            </span>
-          </div>
-
-          <!-- Progress Bar -->
-          <div class="impact-progress-container">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-              <span id="impact-score-text" style="font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; color: var(--accent-green);">0 / 100</span>
-              <span id="impact-badge-label" class="status-badge badge-safe">LOW IMPACT</span>
-            </div>
-            <div class="impact-progress-bar-bg">
-              <div id="impact-progress-bar-fill" class="impact-progress-bar-fill"></div>
-            </div>
-          </div>
-
-          <div id="propagate-depth-line" style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">
-            Changes propagate up to 0 levels deep
-          </div>
-        </div>
-
-        <!-- Needs Manual Review (UNCERTAIN dynamic edges) -->
-        <div id="uncertain-section" class="panel-card" style="display: none; border-left: 3px solid var(--status-uncertain);">
-          <div class="panel-card-title" style="color: #fde047;">
-            <span>⚠️ Needs Manual Review (Dynamic Edges)</span>
-          </div>
-          <div id="uncertain-list" class="affected-items-list"></div>
-        </div>
-
-        <!-- Affected Components List -->
-        <div class="panel-card" style="flex: 1;">
-          <div class="panel-card-title">
-            <span>Affected Components</span>
-            <span id="affected-count-tag" style="font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted);">0 items</span>
-          </div>
-          <div id="affected-list" class="affected-items-list">
-            <div style="color: var(--text-muted); font-size: 0.72rem; text-align: center; padding: 1rem;">
-              Run a simulation to view impact details.
-            </div>
-          </div>
-        </div>
-
-        <!-- Collapsible Accordion Details -->
-        <div class="accordion-box">
-          <div class="accordion-header" id="acc-header-reasons">
-            <span>💡 Reason & Action Recommendation</span>
-            <span>▾</span>
-          </div>
-          <div class="accordion-content" id="acc-content-reasons">
-            <div id="reasons-node-name" style="font-weight: 700; font-family: var(--font-mono); margin-bottom: 0.25rem;">Select a component</div>
-            <div id="reasons-node-text" style="color: var(--text-secondary); margin-bottom: 0.25rem;">Click any affected node in the list or graph to inspect.</div>
-            <div id="reasons-node-rec" style="color: var(--accent-green);"></div>
-          </div>
-        </div>
-
-        <div class="accordion-box">
-          <div class="accordion-header" id="acc-header-chains">
-            <span>🔗 Dependency Chains</span>
-            <span>▾</span>
-          </div>
-          <div class="accordion-content" id="acc-content-chains">
-            <div id="chains-list-box" style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-secondary);">
-              No active chains.
-            </div>
-          </div>
-        </div>
-
-        <div class="accordion-box">
-          <div class="accordion-header" id="acc-header-connections">
-            <span>⚡ Node Connections</span>
-            <span>▾</span>
-          </div>
-          <div class="accordion-content" id="acc-content-connections">
-            <div id="connections-list-box" style="font-size: 0.7rem; color: var(--text-secondary);">
-              Select a node to inspect its inbound/outbound dependencies.
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- TAB 3: HISTORY & ANALYTICS -->
-      <div id="tab-history" class="tab-pane">
-
-        <!-- History & Compare -->
-        <div class="panel-card">
-          <div class="panel-card-title">
-            <span>Simulation History</span>
-            <button id="btn-compare" class="btn btn-ghost" style="padding: 0.2rem 0.5rem; font-size: 0.68rem;" disabled>
-              Compare (0/2)
-            </button>
-          </div>
-          <div style="font-size: 0.68rem; color: var(--text-muted); margin-bottom: 0.45rem;">
-            Check two runs to compare impacts with MongoDB set operations.
-          </div>
-          <div id="history-list" class="affected-items-list" style="max-height: 140px; overflow-y: auto;">
-            <div style="color: var(--text-muted); font-size: 0.72rem; text-align: center; padding: 0.75rem;">
-              No simulations yet.
-            </div>
-          </div>
-        </div>
-
-        <!-- MongoDB Analytics Chart -->
-        <div class="panel-card">
-          <div class="panel-card-title">Blast Radius Trends</div>
-          <div style="height: 140px;">
-            <canvas id="blast-chart"></canvas>
-          </div>
-        </div>
-
-        <!-- Fragile Components -->
-        <div class="panel-card">
-          <div class="panel-card-title">🛡️ Top Fragile Components</div>
-          <div style="max-height: 110px; overflow-y: auto;">
-            <table class="compact-table" id="fragile-table">
-              <thead>
-                <tr><th>Component</th><th>Hits</th><th>Worst</th></tr>
-              </thead>
-              <tbody>
-                <tr><td colspan="3" style="color: var(--text-muted); text-align: center;">No data</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Hotspots -->
-        <div class="panel-card">
-          <div class="panel-card-title">🔥 Dependency Hotspots</div>
-          <div style="max-height: 110px; overflow-y: auto;">
-            <table class="compact-table" id="hotspots-table">
-              <thead>
-                <tr><th>Component</th><th>Dependents</th></tr>
-              </thead>
-              <tbody>
-                <tr><td colspan="2" style="color: var(--text-muted); text-align: center;">No data</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Live Event Stream Feed -->
-        <div class="panel-card">
-          <div class="panel-card-title">
-            <span>📡 Live Audit Feed</span>
-            <span style="font-size: 0.65rem; color: var(--accent-green);">SSE Active</span>
-          </div>
-          <div id="compact-event-feed" class="compact-feed-list">
-            <div style="color: var(--text-muted); text-align: center; padding: 0.5rem;">
-              Awaiting events...
-            </div>
-          </div>
-        </div>
-
-      </div>
-
     </aside>
 
-  </main>
+    <!-- ==================== MAIN COLUMN (TOPBAR + CONTENT) ==================== -->
+    <div class="app-main-column">
 
-  <!-- ==================== 5. MODALS ==================== -->
+      <!-- ==================== TOP BAR ==================== -->
+      <header class="top-bar">
+        <div class="top-bar-left">
+          <!-- Mobile Toggle -->
+          <button id="btn-mobile-sidebar-toggle" class="btn btn-ghost btn-icon mobile-only" title="Toggle Sidebar">
+            ☰
+          </button>
 
-  <!-- Modal: Compare Simulations -->
-  <div id="modal-compare" class="modal-overlay">
-    <div class="modal-card">
-      <div class="modal-header-row">
-        <h3 style="font-size: 0.95rem; font-weight: 700; color: #fff;">Side-by-Side Simulation Comparison</h3>
-        <button id="btn-close-compare-modal" class="close-x-btn">×</button>
-      </div>
-      <div id="compare-modal-body">
-        <!-- Rendered dynamically -->
-      </div>
+          <!-- Project Selector -->
+          <div class="top-control-group">
+            <label class="top-label">Project:</label>
+            <select id="topbar-project-select" class="select-compact text-mono">
+              <option value="">Select Project...</option>
+            </select>
+            <button id="btn-topbar-new-project" class="btn btn-ghost btn-xs" title="Create New Project">+ New</button>
+          </div>
+
+          <!-- Version Selector -->
+          <div class="top-control-group">
+            <label class="top-label">Version:</label>
+            <select id="topbar-version-select" class="select-compact text-mono">
+              <option value="">Select Version...</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="top-bar-right">
+          <!-- Load ShopLite Demo (Glowing Green) -->
+          <button id="btn-topbar-seed" class="btn btn-glowing-green" title="One-click load ShopLite Demo">
+            <span>⚡</span> Load ShopLite
+          </button>
+
+          <!-- Current Simulation Chip -->
+          <div id="topbar-sim-chip" class="topbar-sim-chip" style="display: none;" title="Click to view Chain Reaction">
+            <!-- Dynamically populated -->
+          </div>
+
+          <!-- Connection Status Indicators -->
+          <div id="topbar-db-status" class="top-status-indicator" title="MongoDB Connection Status">
+            <span class="indicator-dot yellow"></span>
+            <span>Atlas</span>
+          </div>
+
+          <div id="topbar-sse-status" class="top-status-indicator" title="SSE Audit Feed Status">
+            <span class="indicator-dot green"></span>
+            <span>Live</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- ==================== MAIN CONTENT AREA (ROUTED PAGES) ==================== -->
+      <main id="main-content" class="main-content">
+        <!-- Rendered by Router -->
+      </main>
+
     </div>
+
   </div>
 
-  <!-- Modal: Scanner (Step 9) -->
-  <div id="modal-scanner" class="modal-overlay">
-    <div class="modal-card">
-      <div class="modal-header-row">
-        <h3 style="font-size: 0.95rem; font-weight: 700; color: #fff;">Heuristic Source Code Scanner (Regex)</h3>
-        <button id="btn-close-scanner-modal" class="close-x-btn">×</button>
-      </div>
-      <p style="font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
-        Paste JS or Python code. BugBound extracts <code>/api/...</code> fetch calls, static property reads (<code>data.user_name</code>), dynamic bracket access (<code>data[key]</code>), and function declarations.
-      </p>
-      <div class="form-field">
-        <label class="form-label">Virtual File Path</label>
-        <input type="text" id="scanner-path" class="form-input" value="src/views/ProfilePage.js">
-      </div>
-      <div class="form-field">
-        <label class="form-label">Source Code</label>
-        <textarea id="scanner-content" class="form-textarea" rows="7" style="font-family: var(--font-mono); font-size: 0.75rem;">
-async function renderProfile(user) {
-  const profile = await fetch('/api/users/profile');
-  const data = await profile.json();
-  const userName = data.user_name;
-  const dyn = data[dynamicKey];
-  return formatUser(userName);
-}
-        </textarea>
-      </div>
-      <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem;">
-        <button id="btn-cancel-scanner" class="btn btn-ghost">Cancel</button>
-        <button id="btn-submit-scanner" class="btn btn-glowing-green">🔍 Scan & Load Manifest</button>
-      </div>
-    </div>
-  </div>
+  <!-- ==================== GLOBAL MODALS ==================== -->
 
-  <!-- Modal: New Project -->
+  <!-- Modal: Create New Project -->
   <div id="modal-new-project" class="modal-overlay">
-    <div class="modal-card" style="max-width: 360px;">
+    <div class="modal-card">
       <div class="modal-header-row">
-        <h3 style="font-size: 0.95rem; font-weight: 700; color: #fff;">Create New Project</h3>
-        <button id="btn-close-project-modal" class="close-x-btn">×</button>
+        <h3>Create New Project</h3>
+        <button id="btn-close-new-project" class="close-x-btn">×</button>
       </div>
       <div class="form-field">
         <label class="form-label">Project Name</label>
-        <input type="text" id="new-project-name" class="form-input" placeholder="e.g. PaymentsService">
+        <input type="text" id="input-new-project-name" class="form-input" placeholder="e.g. PaymentsGateway">
       </div>
-      <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem;">
-        <button id="btn-cancel-project" class="btn btn-ghost">Cancel</button>
-        <button id="btn-create-project-submit" class="btn btn-glowing-green">Create</button>
+      <div class="modal-actions-row">
+        <button id="btn-cancel-new-project" class="btn btn-ghost">Cancel</button>
+        <button id="btn-submit-new-project" class="btn btn-glowing-green">Create Project</button>
       </div>
     </div>
   </div>
@@ -549,7 +230,19 @@ async function renderProfile(user) {
   <!-- Toast Notification Container -->
   <div id="toast-container"></div>
 
-  <!-- Application Logic -->
+  <!-- ==================== SCRIPTS ==================== -->
+  <script src="js/store.js"></script>
+  <script src="js/router.js"></script>
+  <script src="js/pages/dashboard.js"></script>
+  <script src="js/pages/graph.js"></script>
+  <script src="js/pages/simulate.js"></script>
+  <script src="js/pages/chain.js"></script>
+  <script src="js/pages/blast.js"></script>
+  <script src="js/pages/history.js"></script>
+  <script src="js/pages/analytics.js"></script>
+  <script src="js/pages/events.js"></script>
+  <script src="js/pages/scanner.js"></script>
+  <script src="js/pages/about.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
