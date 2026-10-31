@@ -1,0 +1,12 @@
+{
+  "project": "InvalidDemo",
+  "version": "1.0.0",
+  "components": [
+    { "id": "api.get_data", "type": "api", "name": "GET /api/data", "criticality": 3, "meta": {} },
+    { "id": "page.home", "type": "page", "name": "Home Page", "criticality": 4, "meta": {} }
+  ],
+  "edges": [
+    { "from": "page.home", "to": "api.get_data", "kind": "calls", "dynamic": false },
+    { "from": "page.home", "to": "api.missing_endpoint", "kind": "calls", "dynamic": false }
+  ]
+}
