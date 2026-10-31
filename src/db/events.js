@@ -16,6 +16,7 @@ const crypto = require('crypto');
  * @param {string} [opts.eventId] - Optional deterministic eventId; generated if not provided
  * @returns {Object} The inserted event document (or null if duplicate)
  */
+async function logEvent({ projectId, type, status, details = {}, eventId }) {
   try {
     const db = getDb();
     // Generate eventId if not provided
@@ -44,5 +45,6 @@ const crypto = require('crypto');
     console.warn(`[events] Could not log event ${type}:`, err.message);
     return null;
   }
+}
 
 module.exports = { logEvent };

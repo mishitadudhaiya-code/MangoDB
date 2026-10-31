@@ -19,16 +19,17 @@ function buildGraph(manifest) {
 
   // Index components, applying default criticality of 3
   for (const c of manifest.components) {
+    const id = c.id || c.componentId;
     const node = {
-      id: c.id,
+      id,
       type: c.type,
       name: c.name,
       criticality: (c.criticality !== undefined && c.criticality !== null) ? Number(c.criticality) : 3,
       meta: c.meta || {}
     };
-    nodes.set(c.id, node);
-    reverseAdj.set(c.id, []);
-    forwardAdj.set(c.id, []);
+    nodes.set(id, node);
+    reverseAdj.set(id, []);
+    forwardAdj.set(id, []);
   }
 
   // Build adjacency lists
