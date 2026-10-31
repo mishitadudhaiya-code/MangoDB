@@ -9,6 +9,7 @@ const { setup } = require('./db/setup');
 const projectsRouter = require('./routes/projects');
 const simulationsRouter = require('./routes/simulations');
 const analyticsRouter = require('./routes/analytics');
+const demoRouter = require('./routes/demo');
 const { initChangeStream } = require('./services/stream');
 
 const app = express();
@@ -25,6 +26,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.use(projectsRouter);
 app.use(simulationsRouter);
 app.use(analyticsRouter);
+app.use(demoRouter);
 
 // Health check — also pings MongoDB
 app.get('/api/health', async (req, res) => {

@@ -446,4 +446,44 @@ describe('Step 3 & 4: API Routes Integration', () => {
       assert.ok(written.includes('TEST_EVENT'));
     });
   });
+
+  describe('Demo Seed & Samples (Step 8)', () => {
+    let demoRouter;
+
+    before(() => {
+      demoRouter = require('../src/routes/demo');
+    });
+
+    it('POST /api/demo/seed should seed or return existing demo project', async () => {
+      const res = await callRoute(demoRouter, 'POST', '/api/demo/seed');
+      assert.ok([200, 201].includes(res.status));
+      assert.equal(res.body.projectId, 'ShopLite Demo');
+      assert.ok(res.body.versionId);
+    });
+
+    it('GET /api/demo/samples/shoplite returns the ShopLite sample JSON', async () => {
+      const res = await callRoute(demoRouter, 'GET', '/api/demo/samples/shoplite');
+      assert.equal(res.status, 200);
+      assert.equal(res.body.project, 'ShopLite');
+      assert.ok(Array.isArray(res.body.components));
+    });
+
+    it('GET /api/demo/samples/shoplite-v2 returns ShopLite v2 sample JSON', async () => {
+      const res = await callRoute(demoRouter, 'GET', '/api/demo/samples/shoplite-v2');
+      assert.equal(res.status, 200);
+      assert.equal(res.body.version, '2.0.0');
+    });
+
+    it('GET /api/demo/samples/invalid returns the invalid manifest JSON', async () => {
+      const res = await callRoute(demoRouter, 'GET', '/api/demo/samples/invalid');
+      assert.equal(res.status, 200);
+      assert.equal(res.body.project, 'InvalidDemo');
+    });
+
+    it('GET /api/demo/samples/unknown returns 404', async () => {
+      const res = await callRoute(demoRouter, 'GET', '/api/demo/samples/unknown');
+      assert.equal(res.status, 404);
+      assert.ok(res.body.error);
+    });
+  });
 });
