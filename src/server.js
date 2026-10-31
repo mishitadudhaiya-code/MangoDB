@@ -8,6 +8,8 @@ const { connect } = require('./db/index');
 const { setup } = require('./db/setup');
 const projectsRouter = require('./routes/projects');
 const simulationsRouter = require('./routes/simulations');
+const analyticsRouter = require('./routes/analytics');
+const { initChangeStream } = require('./services/stream');
 
 const app = express();
 
@@ -22,6 +24,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 // Routes
 app.use(projectsRouter);
 app.use(simulationsRouter);
+app.use(analyticsRouter);
 
 // Health check — also pings MongoDB
 app.get('/api/health', async (req, res) => {
@@ -52,6 +55,7 @@ async function start() {
   try {
     await connect();
     await setup();
+    await initChangeStream();
   } catch (err) {
     console.error('Failed to connect to MongoDB:', err.message);
     console.error('Set MONGODB_URI in your .env file. The server will start without DB.');

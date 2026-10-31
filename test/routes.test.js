@@ -106,7 +106,7 @@ function createMockDb() {
           async toArray() {
             // Simplified execution of compare pipeline for unit testing
             const matchStage = pipeline.find(s => s.$match);
-            if (matchStage && matchStage.$match && matchStage.$match._id && matchStage.$match._id.$in) {
+            if (name === 'impact_reports' && matchStage && matchStage.$match && matchStage.$match._id && matchStage.$match._id.$in) {
               const ids = matchStage.$match._id.$in;
               const repA = store.impact_reports.get(ids[0]);
               const repB = store.impact_reports.get(ids[1]);
@@ -130,6 +130,41 @@ function createMockDb() {
                 inBothIds
               }];
             }
+
+            if (name === 'simulations') {
+              return Array.from(store.simulations.values())
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 10);
+            }
+
+            if (name === 'impact_reports') {
+              // Fragile components
+              const map = new Map();
+              for (const rep of store.impact_reports.values()) {
+                for (const aff of (rep.affected || [])) {
+                  const curr = map.get(aff.componentId) || { componentId: aff.componentId, name: aff.name, type: aff.type, impactCount: 0, worstStatus: aff.status };
+                  curr.impactCount += 1;
+                  map.set(aff.componentId, curr);
+                }
+              }
+              return Array.from(map.values()).sort((a, b) => b.impactCount - a.impactCount).slice(0, 10);
+            }
+
+            if (name === 'dependency_edges') {
+              // Hotspots
+              const map = new Map();
+              for (const edge of store.dependency_edges.values()) {
+                const count = (map.get(edge.to) || 0) + 1;
+                map.set(edge.to, count);
+              }
+              return Array.from(map.entries()).map(([to, count]) => ({
+                componentId: to,
+                name: to,
+                type: 'api',
+                dependentsCount: count
+              })).sort((a, b) => b.dependentsCount - a.dependentsCount).slice(0, 10);
+            }
+
             return [];
           }
         };
@@ -366,6 +401,49 @@ describe('Step 3 & 4: API Routes Integration', () => {
       assert.ok(Array.isArray(res.body.onlyInB));
       assert.ok(Array.isArray(res.body.inBoth));
       assert.ok(typeof res.body.scoreDifference === 'number');
+    });
+  });
+
+  describe('Analytics & Live Feed (Step 6)', () => {
+    let analyticsRouter;
+
+    before(() => {
+      analyticsRouter = require('../src/routes/analytics');
+    });
+
+    it('GET /api/projects/:id/analytics returns blastRankings, fragileComponents, and hotspots', async () => {
+      const res = await callRoute(analyticsRouter, 'GET', '/api/projects/ShopLite Demo/analytics');
+      assert.equal(res.status, 200);
+      assert.ok(Array.isArray(res.body.blastRankings));
+      assert.ok(Array.isArray(res.body.fragileComponents));
+      assert.ok(Array.isArray(res.body.hotspots));
+    });
+
+    it('GET /api/projects/:id/events returns the last events', async () => {
+      const res = await callRoute(analyticsRouter, 'GET', '/api/projects/ShopLite Demo/events');
+      assert.equal(res.status, 200);
+      assert.ok(Array.isArray(res.body));
+      assert.ok(res.body.length > 0);
+    });
+
+    it('GET /api/stream establishes SSE connection', async () => {
+      let written = '';
+      let headersSet = {};
+      const fakeReq = { on: () => {} };
+      const fakeRes = {
+        writeHead: (code, headers) => { headersSet = headers; },
+        write: (chunk) => { written += chunk; }
+      };
+      const { handleStreamConnection, broadcast, getClientsCount } = require('../src/services/stream');
+      handleStreamConnection(fakeReq, fakeRes);
+
+      assert.equal(headersSet['Content-Type'], 'text/event-stream');
+      assert.ok(written.includes('connected to BugBound event stream'));
+      assert.ok(getClientsCount() >= 1);
+
+      // Test broadcast
+      broadcast({ type: 'TEST_EVENT', test: true });
+      assert.ok(written.includes('TEST_EVENT'));
     });
   });
 });

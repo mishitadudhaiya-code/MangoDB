@@ -34,6 +34,10 @@ async function logEvent({ projectId, type, status, details = {}, eventId }) {
     };
 
     await db.collection('events').insertOne(doc);
+    try {
+      const { broadcast } = require('../services/stream');
+      broadcast(doc);
+    } catch (_streamErr) {}
     return doc;
   } catch (err) {
     // Swallow duplicate key errors — idempotent ingestion
