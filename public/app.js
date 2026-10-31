@@ -1141,6 +1141,56 @@ function setupEventListeners() {
   document.getElementById('btn-upload-v2').addEventListener('click', handleUploadV2);
   document.getElementById('btn-upload-invalid').addEventListener('click', handleUploadInvalid);
 
+  // Scanner Modal (Step 9)
+  const scannerModal = document.getElementById('modal-scanner');
+  document.getElementById('btn-open-scanner').addEventListener('click', () => {
+    scannerModal.style.display = 'flex';
+  });
+  document.getElementById('btn-close-scanner-modal').addEventListener('click', () => {
+    scannerModal.style.display = 'none';
+  });
+  document.getElementById('btn-cancel-scanner').addEventListener('click', () => {
+    scannerModal.style.display = 'none';
+  });
+  document.getElementById('btn-submit-scanner').addEventListener('click', async () => {
+    const path = document.getElementById('scanner-path').value.trim() || 'src/App.js';
+    const content = document.getElementById('scanner-content').value;
+    const btn = document.getElementById('btn-submit-scanner');
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+
+    try {
+      const scanRes = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: [{ path, content }] })
+      });
+      const scanData = await scanRes.json();
+      if (!scanRes.ok) throw new Error(scanData.error || 'Scan failed');
+
+      // Upload the generated manifest to current project or a project named "Scanned Project"
+      const targetProj = state.currentProject || 'Scanned Project';
+      const uploadRes = await fetch(`/api/projects/${encodeURIComponent(targetProj)}/manifest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(scanData.manifest)
+      });
+      const uploadData = await uploadRes.json();
+
+      scannerModal.style.display = 'none';
+      showToast(`Scanned snippet: generated ${scanData.componentCount} components and ${scanData.edgeCount} edges!`, 'success');
+      await loadProjects(targetProj);
+      if (uploadData.versionId) {
+        await loadVersions(targetProj, uploadData.versionId);
+      }
+    } catch (err) {
+      showToast('Scanner error: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔍 Scan & Load Manifest';
+    }
+  });
+
   // File Dropzone & Upload
   const dropZone = document.getElementById('drop-zone');
   const fileInput = document.getElementById('manifest-file-input');

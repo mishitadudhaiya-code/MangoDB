@@ -10,6 +10,7 @@ const projectsRouter = require('./routes/projects');
 const simulationsRouter = require('./routes/simulations');
 const analyticsRouter = require('./routes/analytics');
 const demoRouter = require('./routes/demo');
+const scanRouter = require('./routes/scan');
 const { initChangeStream } = require('./services/stream');
 const { createRateLimiter } = require('./middleware/rateLimit');
 
@@ -33,6 +34,7 @@ app.use(projectsRouter);
 app.use(simulationsRouter);
 app.use(analyticsRouter);
 app.use(demoRouter);
+app.use(scanRouter);
 
 // Health check — also pings MongoDB
 app.get('/api/health', async (req, res) => {

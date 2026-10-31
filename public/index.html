@@ -87,6 +87,9 @@
           <button id="btn-upload-invalid" class="btn btn-secondary btn-block btn-sm">
             <span>💥</span> Try Broken Manifest (422)
           </button>
+          <button id="btn-open-scanner" class="btn btn-secondary btn-block btn-sm">
+            <span>🔍</span> Scan Source Snippet (Regex)
+          </button>
         </div>
       </div>
 
@@ -418,6 +421,39 @@
       </div>
       <div id="compare-modal-body">
         <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Scanner Modal (Step 9) -->
+  <div id="modal-scanner" class="modal-overlay">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3 style="font-size: 1.1rem; font-weight: 700;">Heuristic Source Code Scanner (Regex)</h3>
+        <button id="btn-close-scanner-modal" class="close-btn">×</button>
+      </div>
+      <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+        Paste a JavaScript or Python snippet. BugBound will extract <code>/api/...</code> fetch calls, static property reads (<code>data.user_name</code>), dynamic bracket access (<code>data[key]</code>), and function declarations to construct an impact manifest.
+      </p>
+      <div class="form-group">
+        <label for="scanner-path">Virtual File Path</label>
+        <input type="text" id="scanner-path" value="src/views/ProfilePage.js">
+      </div>
+      <div class="form-group">
+        <label for="scanner-content">Code Snippet</label>
+        <textarea id="scanner-content" rows="8" style="font-family: var(--font-mono); font-size: 0.78rem;">
+async function renderProfile(user) {
+  const profile = await fetch('/api/users/profile');
+  const data = await profile.json();
+  const userName = data.user_name;
+  const dyn = data[dynamicKey];
+  return formatUser(userName);
+}
+        </textarea>
+      </div>
+      <div style="margin-top: 1rem; display: flex; justify-content: flex-end; gap: 0.5rem;">
+        <button id="btn-cancel-scanner" class="btn btn-secondary btn-sm">Cancel</button>
+        <button id="btn-submit-scanner" class="btn btn-primary btn-sm">🔍 Scan & Load Manifest</button>
       </div>
     </div>
   </div>
