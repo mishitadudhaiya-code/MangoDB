@@ -94,25 +94,24 @@ describe('propagate — change types', () => {
     assert.ok(svcEmail, 'svc.email should be affected');
     assert.equal(svcEmail.status, 'BROKEN');
 
-    // page.profile calls api.get_user → AT_RISK (depth 2, static)
+    // page.profile reads user_name directly → BROKEN (depth 1, static)
     const pageProfile = findAffected(affected, 'page.profile');
     assert.ok(pageProfile, 'page.profile should be affected');
-    assert.equal(pageProfile.status, 'AT_RISK');
+    assert.equal(pageProfile.status, 'BROKEN');
 
-    // page.dashboard calls api.get_user → AT_RISK (depth 2, static)
+    // page.dashboard reads user_name directly → BROKEN (depth 1, static)
     const pageDashboard = findAffected(affected, 'page.dashboard');
     assert.ok(pageDashboard, 'page.dashboard should be affected');
-    assert.equal(pageDashboard.status, 'AT_RISK');
+    assert.equal(pageDashboard.status, 'BROKEN');
 
     // page.analytics has dynamic edge → UNCERTAIN
     const pageAnalytics = findAffected(affected, 'page.analytics');
     assert.ok(pageAnalytics, 'page.analytics should be affected');
     assert.equal(pageAnalytics.status, 'UNCERTAIN');
 
-    // page.settings only calls api.get_user — but it should be AT_RISK at depth 2
+    // page.settings does not depend on user_name → SAFE (not in affected)
     const pageSettings = findAffected(affected, 'page.settings');
-    // Settings calls get_user which reads user_name, so it IS reached at depth 2
-    assert.ok(pageSettings, 'page.settings should be affected at depth 2');
+    assert.ok(!pageSettings, 'page.settings should be SAFE (not in affected)');
   });
 
   it('DELETE_FIELD: deleting email field', () => {

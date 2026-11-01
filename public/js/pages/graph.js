@@ -2,15 +2,19 @@
  * public/js/pages/graph.js — Graph Explorer Page Controller
  * Styled after Image 2 left:
  * - Dark dot-grid canvas
- * - Glowing warm orange circular nodes sized by criticality and dependents
- * - Curved green semi-transparent edges with arrowheads converging on hub
+ * - Glowing warm circular nodes sized by criticality and dependents
+ * - Thin curved green semi-transparent edges with arrowheads converging on hub
  * - Dynamic dashed edges
- * - Hover highlight of node + neighbors with rest dimmed
- * - Floating toolbar (zoom, fit, reset, layouts: Force, Concentric, Layered)
- * - "Color by" selector (Type / Criticality / Status)
- * - Search filter & Collapsible Component Explorer tree
- * - Right node details drawer
- * - "Show impact" toggle with animated ripple wave from target outward
+ * - Simulation impact visualization:
+ *     TARGET -> Electric Blue #4da3ff
+ *     BROKEN -> Red #ff4d4d
+ *     AT_RISK -> Orange #ff9f43
+ *     UNCERTAIN -> Yellow #ffd84d (dashed)
+ *     SAFE -> Dimmed Green #2ecc71 (opacity 0.35)
+ * - Auto-detects active simulation from store and defaults "Show Impact" to ON
+ * - Matches component IDs between simulation report and graph nodes, logging any missing IDs
+ * - Explicit height and cy.resize() / cy.fit() on layout, load, and resize
+ * - Prominent visible legend explaining all colors
  */
 
 window.GraphPage = {
@@ -20,22 +24,47 @@ window.GraphPage = {
   cy: null,
   activeLayout: 'cose',
   colorBy: 'type',
-  showImpact: false,
+  showImpact: true,
   rippleTimer: null,
   selectedNode: null,
+  resizeHandler: null,
 
   mount(container, store) {
     this.container = container;
     this.store = store;
     this.colorBy = store.state.colorBy || 'type';
 
+    // Default "Show Impact" to ON whenever a simulation exists in the store
+    const hasSimulation = !!store.state.currentSimulation;
+    this.showImpact = hasSimulation;
+
     this.render();
+
     this.unsubscribe = store.on('stateChanged', () => {
+      // Keep Show Impact ON when a simulation is available
+      if (this.store.state.currentSimulation && !this.showImpact) {
+        this.showImpact = true;
+        const toggle = document.getElementById('toggle-show-impact');
+        if (toggle) toggle.checked = true;
+      }
       this.updateGraphData();
+      this.applyNodeColors();
     });
+
+    this.resizeHandler = () => {
+      if (this.cy) {
+        this.cy.resize();
+        this.cy.fit(null, 40);
+      }
+    };
+    window.addEventListener('resize', this.resizeHandler);
   },
 
   unmount() {
+    if (this.resizeHandler) {
+      window.removeEventListener('resize', this.resizeHandler);
+      this.resizeHandler = null;
+    }
     if (this.rippleTimer) {
       clearInterval(this.rippleTimer);
       this.rippleTimer = null;
@@ -58,14 +87,15 @@ window.GraphPage = {
     const compCount = graphData?.components?.length || 0;
     const edgeCount = graphData?.edges?.length || 0;
     const affectedCount = currentSimulation?.affected?.length || 0;
+    const hasSim = !!currentSimulation;
 
     this.container.innerHTML = `
-      <div class="graph-explorer-layout">
+      <div class="graph-explorer-layout" id="graph-explorer-wrapper">
         <!-- Collapsible Left Explorer Tree Sidebar -->
         <aside class="graph-sidebar-left" id="graph-sidebar-left">
           <div class="explorer-header">
             <span class="panel-card-title-sm">Component Explorer</span>
-            <button id="btn-toggle-graph-tree" class="btn btn-ghost btn-xs">◀</button>
+            <button id="btn-toggle-graph-tree" class="btn btn-ghost btn-xs" title="Toggle Tree Panel">◀</button>
           </div>
 
           <div class="explorer-search-box">
@@ -85,15 +115,15 @@ window.GraphPage = {
             <!-- Dynamically populated tree -->
           </div>
 
-          <!-- Color Legend -->
-          <div class="graph-legend-box">
+          <!-- Color Legend in Sidebar -->
+          <div class="graph-legend-box" id="sidebar-legend-box">
             <span class="legend-title">Legend</span>
             <div id="graph-legend-items" class="legend-items-grid"></div>
           </div>
         </aside>
 
-        <!-- Center Graph Viewport -->
-        <div class="graph-center-viewport">
+        <!-- Center Graph Viewport (Explicit calc height) -->
+        <div class="graph-center-viewport" id="graph-center-viewport">
           <!-- Floating Toolbar -->
           <div class="graph-floating-toolbar">
             <div class="layout-toggle-group">
@@ -106,20 +136,20 @@ window.GraphPage = {
 
             <button id="btn-graph-zoom-in" class="toolbar-btn" title="Zoom In">+</button>
             <button id="btn-graph-zoom-out" class="toolbar-btn" title="Zoom Out">−</button>
-            <button id="btn-graph-fit" class="toolbar-btn" title="Fit Graph">⛶ Fit</button>
-            <button id="btn-graph-rerun" class="toolbar-btn" title="Run Layout">↺</button>
+            <button id="btn-graph-fit" class="toolbar-btn" title="Fit to Viewport">⛶ Fit</button>
+            <button id="btn-graph-rerun" class="toolbar-btn" title="Re-run Layout">↺</button>
 
             <div class="toolbar-divider"></div>
 
-            <!-- Impact Ripple Toggle -->
-            <label class="impact-toggle-label" title="Toggle simulation status colors and ripple chain reaction">
-              <input type="checkbox" id="toggle-show-impact" ${this.showImpact ? 'checked' : ''} ${!currentSimulation ? 'disabled' : ''}>
+            <!-- Impact Ripple Toggle (defaults to ON when simulation exists) -->
+            <label class="impact-toggle-label" title="Show simulation impact colors and ripple effects">
+              <input type="checkbox" id="toggle-show-impact" ${this.showImpact ? 'checked' : ''} ${!hasSim ? 'disabled' : ''}>
               <span class="toggle-slider"></span>
               <span class="toggle-text">Show Impact</span>
             </label>
           </div>
 
-          <!-- Cytoscape Canvas with dark dot grid -->
+          <!-- Cytoscape Main Canvas -->
           <div id="cy-main" class="cytoscape-main-canvas"></div>
 
           <!-- Bottom Left Info Chips -->
@@ -127,6 +157,17 @@ window.GraphPage = {
             <span class="graph-chip">${compCount} components</span>
             <span class="graph-chip">${edgeCount} edges</span>
             <span class="graph-chip chip-affected" id="graph-chip-affected">${affectedCount} affected</span>
+          </div>
+
+          <!-- Visible Floating Canvas Legend (Bottom Right) -->
+          <div class="graph-canvas-legend" id="graph-canvas-legend">
+            <div class="canvas-legend-header">
+              <span class="indicator-dot green"></span>
+              <span class="legend-hdr-text">${this.showImpact && hasSim ? 'Simulation Impact Colors' : 'Component Colors'}</span>
+            </div>
+            <div class="canvas-legend-items" id="canvas-legend-items-list">
+              <!-- Dynamically populated -->
+            </div>
           </div>
 
           <!-- Animation Banner HUD (when ripple is playing) -->
@@ -156,7 +197,9 @@ window.GraphPage = {
     this.renderExplorerTree();
 
     if (graphData && graphData.components && graphData.components.length > 0) {
-      setTimeout(() => this.initCytoscape(graphData), 50);
+      setTimeout(() => {
+        this.initCytoscape(graphData);
+      }, 50);
     } else {
       const cyEl = document.getElementById('cy-main');
       if (cyEl) {
@@ -182,22 +225,26 @@ window.GraphPage = {
       toggleTreeBtn.onclick = () => {
         leftSidebar.classList.toggle('collapsed');
         toggleTreeBtn.textContent = leftSidebar.classList.contains('collapsed') ? '▶' : '◀';
-        if (this.cy) setTimeout(() => this.cy.resize(), 200);
+        if (this.cy) {
+          setTimeout(() => {
+            this.cy.resize();
+            this.cy.fit(null, 40);
+          }, 200);
+        }
       };
     }
 
-    // Color by select
+    // Color by selector
     const colorSelect = document.getElementById('graph-color-by');
     if (colorSelect) {
       colorSelect.onchange = () => {
         this.colorBy = colorSelect.value;
         this.store.setState({ colorBy: this.colorBy });
-        this.renderLegend();
         this.applyNodeColors();
       };
     }
 
-    // Tree search
+    // Tree search filter
     const treeSearch = document.getElementById('graph-tree-search');
     if (treeSearch) {
       treeSearch.oninput = () => this.renderExplorerTree(treeSearch.value.trim().toLowerCase());
@@ -222,7 +269,12 @@ window.GraphPage = {
     if (zoomOut) zoomOut.onclick = () => { if (this.cy) this.cy.zoom(this.cy.zoom() * 0.8); };
 
     const fitBtn = document.getElementById('btn-graph-fit');
-    if (fitBtn) fitBtn.onclick = () => { if (this.cy) this.cy.fit(null, 50); };
+    if (fitBtn) fitBtn.onclick = () => {
+      if (this.cy) {
+        this.cy.resize();
+        this.cy.fit(null, 40);
+      }
+    };
 
     const rerunBtn = document.getElementById('btn-graph-rerun');
     if (rerunBtn) rerunBtn.onclick = () => this.runLayout(this.activeLayout);
@@ -232,10 +284,9 @@ window.GraphPage = {
     if (impactToggle) {
       impactToggle.onchange = () => {
         this.showImpact = impactToggle.checked;
+        this.applyNodeColors();
         if (this.showImpact) {
           this.triggerRippleAnimation();
-        } else {
-          this.applyNodeColors();
         }
       };
     }
@@ -251,37 +302,36 @@ window.GraphPage = {
   },
 
   renderLegend() {
-    const el = document.getElementById('graph-legend-items');
-    if (!el) return;
+    const sidebarEl = document.getElementById('graph-legend-items');
+    const canvasListEl = document.getElementById('canvas-legend-items-list');
+    const sim = this.store.state.currentSimulation;
+    const isImpactActive = this.showImpact && !!sim;
 
-    if (this.colorBy === 'status' || this.showImpact) {
-      el.innerHTML = `
-        <div class="legend-badge"><span class="legend-swatch" style="background: #4da3ff;"></span> Target</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #ff4d4d;"></span> Broken</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #ff9f43;"></span> At Risk</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #ffd84d; border: 1px dashed #fff;"></span> Uncertain</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #2ecc71;"></span> Safe</div>
-      `;
-    } else if (this.colorBy === 'criticality') {
-      el.innerHTML = `
-        <div class="legend-badge"><span class="legend-swatch" style="background: #ff4d4d;"></span> 5 (Critical)</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #ff9f43;"></span> 4 (High)</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #ffd84d;"></span> 3 (Medium)</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #06b6d4;"></span> 2 (Low-Mid)</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #19e6a1;"></span> 1 (Low)</div>
-      `;
-    } else {
-      // Default: Type palette (Warm hues per spec)
-      el.innerHTML = `
-        <div class="legend-badge"><span class="legend-swatch" style="background: #f59e0b;"></span> Field</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #a855f7;"></span> API</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #06b6d4;"></span> Function</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #38bdf8;"></span> Page</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #ec4899;"></span> Service</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #94a3b8;"></span> Config</div>
-        <div class="legend-badge"><span class="legend-swatch" style="background: #f43f5e;"></span> Package</div>
-      `;
-    }
+    const html = isImpactActive ? `
+      <div class="legend-badge"><span class="legend-swatch" style="background: #4da3ff; border: 2px solid #fff;"></span> Target (Blue)</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #ff4d4d;"></span> BROKEN (Red)</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #ff9f43;"></span> AT_RISK (Orange)</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #ffd84d; border: 1px dashed #fff;"></span> UNCERTAIN (Yellow)</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #2ecc71; opacity: 0.5;"></span> SAFE (Dim Green)</div>
+    ` : this.colorBy === 'criticality' ? `
+      <div class="legend-badge"><span class="legend-swatch" style="background: #ff4d4d;"></span> 5 (Critical)</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #ff9f43;"></span> 4 (High)</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #ffd84d;"></span> 3 (Medium)</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #06b6d4;"></span> 2 (Low-Mid)</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #19e6a1;"></span> 1 (Low)</div>
+    ` : `
+      <div class="legend-badge"><span class="legend-swatch" style="background: #f59e0b;"></span> Field</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #a855f7;"></span> API</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #06b6d4;"></span> Function</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #38bdf8;"></span> Page</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #ec4899;"></span> Service</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #94a3b8;"></span> Config</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #f43f5e;"></span> Package</div>
+      <div class="legend-badge"><span class="legend-swatch" style="background: #d97706;"></span> Table</div>
+    `;
+
+    if (sidebarEl) sidebarEl.innerHTML = html;
+    if (canvasListEl) canvasListEl.innerHTML = html;
   },
 
   renderExplorerTree(filter = '') {
@@ -294,12 +344,12 @@ window.GraphPage = {
       return;
     }
 
-    // Group by type
     const groups = {};
     graphData.components.forEach(c => {
       const t = c.type || 'other';
       if (!groups[t]) groups[t] = [];
-      if (!filter || c.name.toLowerCase().includes(filter) || c.id.toLowerCase().includes(filter)) {
+      const cid = c.id || c.componentId;
+      if (!filter || c.name.toLowerCase().includes(filter) || cid.toLowerCase().includes(filter)) {
         groups[t].push(c);
       }
     });
@@ -318,13 +368,16 @@ window.GraphPage = {
             <span class="tree-type-label text-mono">${t} (${items.length})</span>
           </div>
           <div class="tree-group-items">
-            ${items.map(item => `
-              <div class="tree-item-row" data-id="${item.id}">
-                <span class="tree-item-dot" style="background: ${this.getTypeColor(item.type).border};"></span>
-                <span class="tree-item-name text-mono">${item.name}</span>
-                <span class="tree-item-crit">${item.criticality || 1}★</span>
-              </div>
-            `).join('')}
+            ${items.map(item => {
+              const cid = item.id || item.componentId;
+              return `
+                <div class="tree-item-row" data-id="${cid}">
+                  <span class="tree-item-dot" style="background: ${this.getTypeColor(item.type).border};"></span>
+                  <span class="tree-item-name text-mono">${item.name}</span>
+                  <span class="tree-item-crit">${item.criticality || 1}★</span>
+                </div>
+              `;
+            }).join('')}
           </div>
         </div>
       `;
@@ -332,7 +385,6 @@ window.GraphPage = {
 
     container.innerHTML = html || '<div class="text-muted text-xs" style="padding: 1rem; text-align: center;">No matching components</div>';
 
-    // Click item in tree
     const rows = container.querySelectorAll('.tree-item-row');
     rows.forEach(row => {
       row.onclick = () => {
@@ -345,6 +397,7 @@ window.GraphPage = {
   getTypeColor(type) {
     const palette = {
       field: { bg: '#b45309', border: '#f59e0b' },
+      table: { bg: '#78350f', border: '#d97706' },
       api: { bg: '#6b21a8', border: '#a855f7' },
       function: { bg: '#0e7490', border: '#06b6d4' },
       page: { bg: '#0369a1', border: '#38bdf8' },
@@ -363,7 +416,6 @@ window.GraphPage = {
       try { this.cy.destroy(); } catch (_e) {}
     }
 
-    // Build elements
     const elements = [];
     const inboundCounts = {};
     (graphData.edges || []).forEach(e => {
@@ -371,12 +423,13 @@ window.GraphPage = {
     });
 
     (graphData.components || []).forEach(c => {
-      const inCount = inboundCounts[c.id] || 0;
+      const cid = c.id || c.componentId;
+      const inCount = inboundCounts[cid] || 0;
       const size = Math.max(26, Math.min(64, 22 + (c.criticality || 1) * 5 + inCount * 3));
       elements.push({
         data: {
-          id: c.id,
-          name: c.name || c.id,
+          id: cid,
+          name: c.name || cid,
           type: c.type || 'field',
           criticality: c.criticality || 1,
           inboundCount: inCount,
@@ -442,8 +495,8 @@ window.GraphPage = {
             style: {
               'line-style': 'dashed',
               'line-dash-pattern': [4, 4],
-              'line-color': 'rgba(255, 216, 77, 0.5)',
-              'target-arrow-color': 'rgba(255, 216, 77, 0.8)'
+              'line-color': 'rgba(255, 216, 77, 0.6)',
+              'target-arrow-color': 'rgba(255, 216, 77, 0.9)'
             }
           },
           // Dimmed class
@@ -477,7 +530,9 @@ window.GraphPage = {
             style: {
               'background-color': '#1d4ed8',
               'border-color': '#4da3ff',
-              'border-width': 4
+              'border-width': 4,
+              'border-style': 'solid',
+              'opacity': 1
             }
           },
           {
@@ -485,7 +540,9 @@ window.GraphPage = {
             style: {
               'background-color': '#991b1b',
               'border-color': '#ff4d4d',
-              'border-width': 3
+              'border-width': 3,
+              'border-style': 'solid',
+              'opacity': 1
             }
           },
           {
@@ -493,7 +550,9 @@ window.GraphPage = {
             style: {
               'background-color': '#9a3412',
               'border-color': '#ff9f43',
-              'border-width': 3
+              'border-width': 3,
+              'border-style': 'solid',
+              'opacity': 1
             }
           },
           {
@@ -502,15 +561,17 @@ window.GraphPage = {
               'background-color': '#854d0e',
               'border-color': '#ffd84d',
               'border-style': 'dashed',
-              'border-width': 3
+              'border-width': 3,
+              'opacity': 1
             }
           },
           {
             selector: '.status-safe',
             style: {
-              'background-color': '#14532d',
+              'background-color': '#064e3b',
               'border-color': '#2ecc71',
-              'opacity': 0.4
+              'border-width': 1.5,
+              'opacity': 0.35
             }
           }
         ],
@@ -523,17 +584,37 @@ window.GraphPage = {
         }
       });
 
+      this.cy.on('layoutstop', () => {
+        if (this.cy) {
+          this.cy.resize();
+          this.cy.fit(null, 40);
+        }
+      });
+
       this.setupCytoscapeEvents();
       this.applyNodeColors();
+
+      setTimeout(() => {
+        if (this.cy) {
+          this.cy.resize();
+          this.cy.fit(null, 40);
+        }
+      }, 100);
+
+      setTimeout(() => {
+        if (this.cy) {
+          this.cy.resize();
+          this.cy.fit(null, 40);
+        }
+      }, 300);
     } catch (err) {
-      console.error('Cytoscape init error:', err);
+      console.error('[BugBound Graph] Cytoscape init error:', err);
     }
   },
 
   setupCytoscapeEvents() {
     if (!this.cy) return;
 
-    // Hover: highlight node + neighbors and dim rest
     this.cy.on('mouseover', 'node', (e) => {
       const node = e.target;
       const neighborhood = node.neighborhood().add(node);
@@ -545,14 +626,12 @@ window.GraphPage = {
       this.cy.elements().removeClass('dimmed').removeClass('highlighted');
     });
 
-    // Node Click: open details drawer
     this.cy.on('tap', 'node', (e) => {
       const node = e.target;
       this.selectedNode = node;
       this.openNodeDrawer(node.id());
     });
 
-    // Canvas click: close drawer if clicked background
     this.cy.on('tap', (e) => {
       if (e.target === this.cy) {
         const rightSidebar = document.getElementById('graph-sidebar-right');
@@ -572,22 +651,109 @@ window.GraphPage = {
         padding: 50
       }).run();
     } catch (err) {
-      console.warn('Layout run error:', err);
+      console.warn('[BugBound Graph] Layout run error:', err);
     }
   },
 
+  /**
+   * Applies simulation status colors or type/criticality styling.
+   * Matches component IDs from report affected[] to graph nodes, logging any missing IDs.
+   */
   applyNodeColors() {
     if (!this.cy) return;
 
+    const sim = this.store.state.currentSimulation;
+    const isImpactActive = this.showImpact && !!sim;
+    const targetId = sim?.change?.targetId || sim?.target;
+
+    // Create affected map for fast O(1) lookup
+    const affectedMap = new Map();
+    if (sim && Array.isArray(sim.affected)) {
+      sim.affected.forEach(a => {
+        const cid = a.componentId || a.id;
+        if (cid) affectedMap.set(cid, a);
+      });
+    }
+
+    // Step 2 requirement: verify and log any ID from affected[] that fails to match in the graph
+    if (isImpactActive && sim && Array.isArray(sim.affected)) {
+      sim.affected.forEach(a => {
+        const cid = a.componentId || a.id;
+        if (cid && this.cy.getElementById(cid).empty()) {
+          console.warn(`[BugBound Graph] Component ID from simulation report not found in graph nodes: "${cid}"`);
+        }
+      });
+    }
+
     this.cy.batch(() => {
-      // Clear status classes first
-      this.cy.nodes().removeClass('status-target status-broken status-at-risk status-uncertain status-safe');
+      // Clear all status and highlight classes
+      this.cy.nodes().removeClass('status-target status-broken status-at-risk status-uncertain status-safe dimmed highlighted');
+      this.cy.edges().removeClass('dimmed highlighted');
 
       this.cy.nodes().forEach(node => {
+        const nodeId = node.id();
         const type = node.data('type');
         const criticality = node.data('criticality');
 
-        if (this.colorBy === 'criticality') {
+        if (isImpactActive) {
+          if (nodeId === targetId) {
+            // Target: Electric Blue #4da3ff
+            node.addClass('status-target');
+            node.data('status', 'TARGET');
+            node.style({
+              'background-color': '#1d4ed8',
+              'border-color': '#4da3ff',
+              'border-width': 4,
+              'border-style': 'solid',
+              'opacity': 1
+            });
+          } else if (affectedMap.has(nodeId)) {
+            const item = affectedMap.get(nodeId);
+            const status = item.status; // 'BROKEN', 'AT_RISK', 'UNCERTAIN'
+            node.addClass(`status-${status.toLowerCase()}`);
+            node.data('status', status);
+
+            if (status === 'BROKEN') {
+              // BROKEN: Red #ff4d4d
+              node.style({
+                'background-color': '#991b1b',
+                'border-color': '#ff4d4d',
+                'border-width': 3,
+                'border-style': 'solid',
+                'opacity': 1
+              });
+            } else if (status === 'AT_RISK') {
+              // AT_RISK: Orange #ff9f43
+              node.style({
+                'background-color': '#9a3412',
+                'border-color': '#ff9f43',
+                'border-width': 3,
+                'border-style': 'solid',
+                'opacity': 1
+              });
+            } else if (status === 'UNCERTAIN') {
+              // UNCERTAIN: Yellow #ffd84d dashed
+              node.style({
+                'background-color': '#854d0e',
+                'border-color': '#ffd84d',
+                'border-width': 3,
+                'border-style': 'dashed',
+                'opacity': 1
+              });
+            }
+          } else {
+            // SAFE: Dimmed Green #2ecc71
+            node.addClass('status-safe');
+            node.data('status', 'SAFE');
+            node.style({
+              'background-color': '#064e3b',
+              'border-color': '#2ecc71',
+              'border-width': 1.5,
+              'border-style': 'solid',
+              'opacity': 0.35
+            });
+          }
+        } else if (this.colorBy === 'criticality') {
           const critPalette = {
             1: { bg: '#064e3b', border: '#19e6a1' },
             2: { bg: '#155e75', border: '#06b6d4' },
@@ -596,27 +762,28 @@ window.GraphPage = {
             5: { bg: '#991b1b', border: '#ff4d4d' }
           };
           const c = critPalette[criticality] || critPalette[1];
-          node.style({ 'background-color': c.bg, 'border-color': c.border });
-        } else if (this.colorBy === 'status') {
-          const sim = this.store.state.currentSimulation;
-          const targetId = sim?.change?.targetId || sim?.target;
-          if (node.id() === targetId) {
-            node.addClass('status-target');
-          } else {
-            const affectedItem = sim?.affected?.find(a => (a.componentId || a.id) === node.id());
-            if (affectedItem) {
-              node.addClass(`status-${affectedItem.status.toLowerCase()}`);
-            } else {
-              node.addClass('status-safe');
-            }
-          }
+          node.style({
+            'background-color': c.bg,
+            'border-color': c.border,
+            'border-width': 2,
+            'border-style': 'solid',
+            'opacity': 1
+          });
         } else {
           // Default: type colors with warm glowing borders
           const c = this.getTypeColor(type);
-          node.style({ 'background-color': c.bg, 'border-color': c.border });
+          node.style({
+            'background-color': c.bg,
+            'border-color': c.border,
+            'border-width': 2,
+            'border-style': 'solid',
+            'opacity': 1
+          });
         }
       });
     });
+
+    this.renderLegend();
   },
 
   triggerRippleAnimation() {
@@ -635,7 +802,6 @@ window.GraphPage = {
     const bannerText = document.getElementById('ripple-text');
     if (banner) banner.style.display = 'flex';
 
-    // Group affected by depth
     const affected = sim.affected || [];
     const depthGroups = {};
     affected.forEach(a => {
@@ -647,15 +813,8 @@ window.GraphPage = {
     const depths = Object.keys(depthGroups).map(Number).sort((a, b) => a - b);
     const maxDepth = depths.length > 0 ? Math.max(...depths) : 1;
 
-    // Reset everything to dimmed
-    this.cy.batch(() => {
-      this.cy.elements().removeClass('status-target status-broken status-at-risk status-uncertain status-safe highlighted');
-      this.cy.elements().addClass('dimmed');
-    });
-
-    // Step 0: Target flashes
-    if (bannerText) bannerText.textContent = `Ripple Wave: Target [${targetId}] modified`;
-    targetNode.removeClass('dimmed').addClass('status-target highlighted');
+    // Pulse target node
+    if (bannerText) bannerText.textContent = `Ripple Wave: Origin [${targetId}] modified`;
     targetNode.animate({
       style: { 'width': targetNode.data('size') * 1.5, 'height': targetNode.data('size') * 1.5 },
       duration: 300
@@ -673,6 +832,7 @@ window.GraphPage = {
         setTimeout(() => {
           if (banner) banner.style.display = 'none';
         }, 2500);
+        this.applyNodeColors();
         return;
       }
 
@@ -681,15 +841,12 @@ window.GraphPage = {
       const depthItems = depthGroups[currentStep] || [];
       this.cy.batch(() => {
         depthItems.forEach(item => {
-          const node = this.cy.getElementById(item.componentId || item.id);
+          const cid = item.componentId || item.id;
+          const node = this.cy.getElementById(cid);
           if (node && !node.empty()) {
-            node.removeClass('dimmed');
-            node.addClass(`status-${item.status.toLowerCase()}`);
             node.addClass('highlighted');
-
-            // Light up edges connected from previous depth / target
             node.connectedEdges().forEach(e => {
-              e.removeClass('dimmed').addClass('highlighted');
+              e.addClass('highlighted');
             });
           }
         });
@@ -724,14 +881,12 @@ window.GraphPage = {
     drawer.classList.add('open');
 
     const { graphData, currentSimulation } = this.store.state;
-    const comp = graphData?.components?.find(c => c.id === nodeId);
+    const comp = graphData?.components?.find(c => (c.id || c.componentId) === nodeId);
     if (!comp) return;
 
-    // Incoming & Outgoing edges
     const incoming = (graphData?.edges || []).filter(e => e.to === nodeId);
     const outgoing = (graphData?.edges || []).filter(e => e.from === nodeId);
 
-    // Simulation impact info
     const affectedItem = currentSimulation?.affected?.find(a => (a.componentId || a.id) === nodeId);
     const isTarget = (currentSimulation?.change?.targetId || currentSimulation?.target) === nodeId;
 
@@ -740,7 +895,7 @@ window.GraphPage = {
         <div class="drawer-field">
           <span class="drawer-label">Component Name</span>
           <span class="text-mono font-bold" style="font-size: 0.95rem;">${comp.name}</span>
-          <span class="text-muted text-xs text-mono">${comp.id}</span>
+          <span class="text-muted text-xs text-mono">${nodeId}</span>
         </div>
 
         <div class="drawer-field">
@@ -753,7 +908,7 @@ window.GraphPage = {
 
         ${isTarget ? `
           <div class="drawer-field alert-box-info">
-            <strong>🎯 Origin Target:</strong> This component is the primary target of the active simulation.
+            <strong>🎯 Origin Target:</strong> Primary target of active change simulation.
           </div>
         ` : affectedItem ? `
           <div class="drawer-field" style="border-top: 1px solid var(--border-subtle); padding-top: 0.5rem;">
@@ -765,12 +920,17 @@ window.GraphPage = {
             <div class="drawer-reason-box">${affectedItem.reason}</div>
             <div class="drawer-rec-box">${affectedItem.recommendation}</div>
           </div>
-        ` : ''}
+        ` : `
+          <div class="drawer-field" style="border-top: 1px solid var(--border-subtle); padding-top: 0.5rem;">
+            <span class="drawer-label">Simulation Status</span>
+            <div><span class="status-pill pill-safe">SAFE</span> <span class="text-xs text-muted">Unaffected by active change</span></div>
+          </div>
+        `}
 
         <div class="drawer-field">
           <span class="drawer-label">Inbound Dependents (${incoming.length})</span>
           <div class="drawer-conn-list">
-            ${incoming.length === 0 ? '<div class="text-muted text-xs">No inbound dependents (Root/Leaf)</div>' : incoming.map(e => `
+            ${incoming.length === 0 ? '<div class="text-muted text-xs">No inbound dependents (Leaf)</div>' : incoming.map(e => `
               <div class="conn-item text-mono text-xs">
                 <span>←</span> <span>${e.from}</span> <span class="text-muted">(${e.kind})</span>
               </div>
@@ -781,7 +941,7 @@ window.GraphPage = {
         <div class="drawer-field">
           <span class="drawer-label">Outbound Dependencies (${outgoing.length})</span>
           <div class="drawer-conn-list">
-            ${outgoing.length === 0 ? '<div class="text-muted text-xs">No outbound dependencies</div>' : outgoing.map(e => `
+            ${outgoing.length === 0 ? '<div class="text-muted text-xs">No outbound dependencies (Root)</div>' : outgoing.map(e => `
               <div class="conn-item text-mono text-xs">
                 <span>→</span> <span>${e.to}</span> <span class="text-muted">${e.dynamic ? '[dynamic]' : `(${e.kind})`}</span>
               </div>
@@ -797,6 +957,8 @@ window.GraphPage = {
     if (graphData && (!this.cy || this.cy.elements().length === 0)) {
       this.initCytoscape(graphData);
       this.renderExplorerTree();
+    } else if (this.cy) {
+      this.applyNodeColors();
     }
   }
 };
