@@ -68,7 +68,7 @@ class BugBoundStore extends EventEmitter {
         currentSimulation: this.state.currentSimulation,
         colorBy: this.state.colorBy
       }));
-    } catch (_e) {}
+    } catch (_e) { }
   }
 
   setState(partial) {
@@ -98,7 +98,7 @@ class BugBoundStore extends EventEmitter {
       if (!res.ok) throw new Error('Failed to fetch projects');
       const projects = await res.json();
       let selectedProject = this.state.selectedProject;
-      
+
       // Auto-select first project if none selected or selected does not exist
       if (projects.length > 0) {
         const found = projects.find(p => p._id === selectedProject?._id || p.name === selectedProject?.name);
@@ -273,6 +273,22 @@ class BugBoundStore extends EventEmitter {
   }
 
   async runSimulation(versionId, changeType, target, params = {}) {
+    // FIX: the backend requires from/to for these change types, but the UI
+    // only collects newName / newType / toVersion. Map them here so every
+    // caller (Simulate page, Dashboard example, presets) works.
+    params = { ...params };
+    const tName = String(target || '').split('.').pop();
+    if (changeType === 'RENAME_FIELD') {
+      params.from = params.from || tName;
+      params.to = params.to || params.newName || '';
+    } else if (changeType === 'CHANGE_FIELD_TYPE') {
+      params.from = params.from || 'current';
+      params.to = params.to || params.newType || '';
+    } else if (changeType === 'UPGRADE_DEPENDENCY_MAJOR') {
+      params.from = params.from || 'current';
+      params.to = params.to || params.toVersion || '';
+    }
+
     const res = await fetch(`/api/versions/${encodeURIComponent(versionId)}/simulate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -342,7 +358,7 @@ class BugBoundStore extends EventEmitter {
           const currentEvents = [ev, ...(this.state.events || [])].slice(0, 100);
           this.setState({ events: currentEvents });
           this.emit('newEvent', ev);
-        } catch (_err) {}
+        } catch (_err) { }
       };
       this.eventSource.onerror = () => {
         this.setState({ sseConnected: false });
