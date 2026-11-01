@@ -992,3 +992,4 @@ The following table documents deviations between the early design proposal (`PRO
 | **Authentication & RBAC** | Out of scope. | Intentionally not implemented. No auth middleware. | Adheres strictly to the project scope and 24-hour hackathon rules. |
 | **Runtime Tracing & APM** | Out of scope. | Intentionally not implemented. Static dependency modeling only. | Runtime tracing requires agent bytecode injection and live execution environments, violating static modeling scope. |
 | **Git Webhook Sync** | Out of scope. | Intentionally not implemented. Manifest ingestion is driven via REST API and UI upload. | Avoids external VCS dependencies and secret token management. |
+

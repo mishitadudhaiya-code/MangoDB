@@ -57,6 +57,31 @@ function validateChange(graph, change) {
 }
 
 /**
+ * Accept the UI's friendly param names and fill in the required from/to.
+ * Only kicks in when an alias (newName / newType / toVersion) is present, so a
+ * request with truly missing params is still rejected by validateChange.
+ * @param {Object} change - { type, targetId, params }
+ * @returns {Object} a new change object with normalized params
+ */
+function normalizeChange(change) {
+  if (!change || typeof change !== 'object' || !change.params) return change;
+  const p = { ...change.params };
+  const targetName = typeof change.targetId === 'string' ? change.targetId.split('.').pop() : '';
+
+  if (change.type === 'RENAME_FIELD' && p.newName) {
+    if (!p.from) p.from = targetName;
+    if (!p.to) p.to = p.newName;
+  } else if (change.type === 'CHANGE_FIELD_TYPE' && p.newType) {
+    if (!p.from) p.from = 'current';
+    if (!p.to) p.to = p.newType;
+  } else if (change.type === 'UPGRADE_DEPENDENCY_MAJOR' && p.toVersion) {
+    if (!p.from) p.from = 'current';
+    if (!p.to) p.to = p.toVersion;
+  }
+  return { ...change, params: p };
+}
+
+/**
  * Run a full simulation.
  * @param {Object} manifestOrGraph - Either a manifest (with components/edges) or a pre-built graph
  * @param {Object} change - { type, targetId, params }
@@ -64,6 +89,9 @@ function validateChange(graph, change) {
  * @throws {Object} { status: 400|422, errors: string[] }
  */
 function simulate(manifestOrGraph, change) {
+  // Map UI param names (newName, newType, toVersion) to from/to
+  change = normalizeChange(change);
+
   // Build graph if we got a manifest
   let graph;
   if (manifestOrGraph.nodes instanceof Map) {
